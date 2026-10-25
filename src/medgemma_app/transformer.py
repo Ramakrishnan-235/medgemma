@@ -2,18 +2,30 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models" / "medgemma-1.5-4b-it"
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check CUDA without loading the model")
+    parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=Path(os.getenv("MEDGEMMA_MODEL_DIR", str(MODEL_DIR))),
+        help="Path to local model checkpoint directory",
+    )
     parser.add_argument("--prompt", default="Explain what a red blood cell does in one sentence.")
     parser.add_argument("--image", type=Path, help="Optional local image")
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--cpu-offload", action="store_true", help="Use CPU RAM when GPU memory is limited")
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
     if not 1 <= args.max_new_tokens <= 512:
         parser.error("--max-new-tokens must be between 1 and 512")
@@ -34,8 +46,10 @@ def main() -> None:
     if args.check:
         print("CUDA computation: OK", flush=True)
         return
-    if not (MODEL_DIR / "model.safetensors.index.json").is_file():
-        raise SystemExit(f"Model files not found: {MODEL_DIR}")
+
+    model_dir = args.model_dir.resolve()
+    if not ((model_dir / "config.json").is_file() or (model_dir / "model.safetensors.index.json").is_file()):
+        raise SystemExit(f"Model files not found: {model_dir}")
 
     from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
 
@@ -53,21 +67,25 @@ def main() -> None:
     print("Loading local model in 4-bit NF4...", flush=True)
     try:
         model = AutoModelForImageTextToText.from_pretrained(
-            MODEL_DIR,
+            model_dir,
             local_files_only=True,
             quantization_config=quantization,
-            dtype=dtype,
+            torch_dtype=dtype,
             attn_implementation="sdpa",
             **placement,
         ).eval()
         device_map = getattr(model, "hf_device_map", placement["device_map"])
         print(f"Model footprint: {model.get_memory_footprint() / 2**30:.2f} GiB; placement: {device_map}", flush=True)
-        processor = AutoProcessor.from_pretrained(MODEL_DIR, local_files_only=True)
+        processor = AutoProcessor.from_pretrained(model_dir, local_files_only=True)
         content = []
         if args.image is not None:
-            from PIL import Image
-            with Image.open(args.image) as image:
-                content.append({"type": "image", "image": image.convert("RGB")})
+            from PIL import Image, UnidentifiedImageError
+            try:
+                with Image.open(args.image) as image:
+                    content.append({"type": "image", "image": image.convert("RGB")})
+            except (UnidentifiedImageError, OSError) as exc:
+                raise SystemExit(f"Failed to open or decode image file '{args.image}': {exc}")
+
         content.append({"type": "text", "text": args.prompt})
         inputs = processor.apply_chat_template(
             [{"role": "user", "content": content}],
@@ -75,11 +93,16 @@ def main() -> None:
             tokenize=True,
             return_dict=True,
             return_tensors="pt",
-        ).to(model.device, dtype=dtype)
+        )
+        inputs = inputs.to(model.device)
+        if "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].to(dtype=dtype)
+
         input_length = inputs["input_ids"].shape[-1]
         with torch.inference_mode():
             output = model.generate(**inputs, max_new_tokens=args.max_new_tokens, do_sample=False)
-        print(processor.decode(output[0, input_length:], skip_special_tokens=True), flush=True)
+        output_tokens = output[0, input_length:] if output.shape[-1] > input_length else output[0]
+        print(processor.decode(output_tokens, skip_special_tokens=True), flush=True)
         print(f"Peak GPU allocation: {torch.cuda.max_memory_allocated() / 2**30:.2f} GiB", flush=True)
     except torch.OutOfMemoryError:
         raise SystemExit("GPU memory is full. Retry with --cpu-offload, a shorter prompt, or fewer output tokens.")
@@ -87,4 +110,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
