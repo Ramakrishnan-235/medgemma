@@ -91,7 +91,7 @@ class EvidenceChunk(Base):
         UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
     )
     source_file_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=False, index=True
     )
     page_or_frame: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # Normalized bounding box: {"x0": 0.1, "y0": 0.2, "x1": 0.85, "y1": 0.28} in 0.0..1.0 space
@@ -182,7 +182,7 @@ class ReportVersion(Base):
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     source_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
     tiptap_doc_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     citations_snapshot_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)

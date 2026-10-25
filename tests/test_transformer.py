@@ -1,6 +1,5 @@
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from medgemma_app.transformer import build_parser, MODEL_DIR
 
@@ -39,6 +38,10 @@ class TestTransformerCLI(unittest.TestCase):
 
         args_upper = self.parser.parse_args(["--max-new-tokens", "512"])
         self.assertEqual(args_upper.max_new_tokens, 512)
+
+    def test_invalid_tokens_type(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(["--max-new-tokens", "not_a_number"])
 
 
 if __name__ == "__main__":

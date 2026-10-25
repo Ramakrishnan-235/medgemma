@@ -1,12 +1,11 @@
-import os
 from celery import Celery
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+from app.core.config import settings
 
 celery_app = Celery(
     "medgemma_workers",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
 )
 
 celery_app.conf.update(
@@ -20,3 +19,8 @@ celery_app.conf.update(
         "app.workers.tasks.bulk.*": {"queue": "bulk"},
     },
 )
+
+
+@celery_app.task(name="app.workers.tasks.interactive.ping")
+def ping_task() -> dict[str, str]:
+    return {"status": "pong", "mode": settings.MEDGEMMA_MODE}

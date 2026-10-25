@@ -4,13 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.db.session import engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup logic
+    # Startup: ensure connections / telemetry initialized
     yield
-    # Shutdown logic
+    # Shutdown: gracefully close PostgreSQL connection pool
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -20,11 +22,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Secure CORS configuration: explicit origins when allow_credentials=True
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 

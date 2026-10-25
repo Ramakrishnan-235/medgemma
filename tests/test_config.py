@@ -1,11 +1,10 @@
 import os
 import sys
-import tempfile
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "apps", "api")))
 
-from app.core.config import _load_env_fallback, _safe_int, settings
+from app.core.config import _load_env_fallback, _parse_cors_origins, _safe_int, settings
 
 
 class TestConfig(unittest.TestCase):
@@ -18,6 +17,17 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(_safe_int(None, default=3), 3)
         self.assertEqual(_safe_int("invalid_number", default=2), 2)
 
+    def test_cors_origins_parsing(self) -> None:
+        defaults = _parse_cors_origins(None)
+        self.assertIn("http://localhost:3000", defaults)
+        self.assertIn("http://web:3000", defaults)
+
+        custom = _parse_cors_origins("https://app.medgemma.com, https://admin.medgemma.com")
+        self.assertEqual(custom, ["https://app.medgemma.com", "https://admin.medgemma.com"])
+
+        empty_custom = _parse_cors_origins("   ")
+        self.assertEqual(empty_custom, defaults)
+
     def test_settings_defaults(self) -> None:
         self.assertIsNotNone(settings.POSTGRES_USER)
         self.assertIsNotNone(settings.DATABASE_URL)
@@ -25,6 +35,8 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(settings.MEDGEMMA_MODE, "local_4bit")
         self.assertEqual(settings.MEDGEMMA_PROCESSOR_VERSION, "1.5.0-896px")
         self.assertGreaterEqual(settings.MEDGEMMA_MAX_CONCURRENCY, 1)
+        self.assertIsInstance(settings.CORS_ORIGINS, list)
+        self.assertIn("http://localhost:3000", settings.CORS_ORIGINS)
 
 
 if __name__ == "__main__":

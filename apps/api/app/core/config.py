@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+
 def _safe_int(val: Optional[str], default: int = 1) -> int:
     if val is None or not str(val).strip():
         return default
@@ -8,6 +9,20 @@ def _safe_int(val: Optional[str], default: int = 1) -> int:
         return int(str(val).strip())
     except ValueError:
         return default
+
+
+def _parse_cors_origins(raw: Optional[str]) -> list[str]:
+    default_origins = [
+        "http://localhost:3000",
+        "http://localhost:80",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:80",
+        "http://web:3000",
+    ]
+    if not raw or not raw.strip():
+        return default_origins
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    return origins if origins else default_origins
 
 
 def _load_env_fallback() -> None:
@@ -20,6 +35,8 @@ def _load_env_fallback() -> None:
                         if line and not line.startswith("#") and "=" in line:
                             key, _, val = line.partition("=")
                             key = key.strip()
+                            if "#" in val and not (val.startswith('"') or val.startswith("'")):
+                                val = val.split("#", 1)[0]
                             val = val.strip().strip("'\"")
                             if key and key not in os.environ:
                                 os.environ[key] = val
@@ -54,6 +71,14 @@ try:
         JWKS_URL: str = "http://web:3000/api/auth/jwks"
         JWT_ISSUER: str = "http://localhost:3000"
         JWT_AUDIENCE: str = "medgemma-api"
+        DEBUG_ALLOW_UNVERIFIED_JWT: bool = False
+        CORS_ORIGINS: list[str] = [
+            "http://localhost:3000",
+            "http://localhost:80",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:80",
+            "http://web:3000",
+        ]
 
         MEDGEMMA_MODE: str = "local_4bit"
         MEDGEMMA_CHECKPOINT: str = "google/medgemma-1.5-4b-it"
@@ -87,6 +112,8 @@ except ImportError:
         JWKS_URL: str = os.getenv("JWKS_URL", "http://web:3000/api/auth/jwks")
         JWT_ISSUER: str = os.getenv("JWT_ISSUER", "http://localhost:3000")
         JWT_AUDIENCE: str = os.getenv("JWT_AUDIENCE", "medgemma-api")
+        DEBUG_ALLOW_UNVERIFIED_JWT: bool = os.getenv("DEBUG_ALLOW_UNVERIFIED_JWT", "false").lower() in ("1", "true", "yes")
+        CORS_ORIGINS: list[str] = _parse_cors_origins(os.getenv("CORS_ORIGINS"))
 
         MEDGEMMA_MODE: str = os.getenv("MEDGEMMA_MODE", "local_4bit")
         MEDGEMMA_CHECKPOINT: str = os.getenv("MEDGEMMA_CHECKPOINT", "google/medgemma-1.5-4b-it")
