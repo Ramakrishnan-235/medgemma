@@ -1,0 +1,11 @@
+:80 {
+    # Route API requests to FastAPI backend
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    # Route all other frontend requests to Next.js web service
+    handle {
+        reverse_proxy web:3000
+    }
+}

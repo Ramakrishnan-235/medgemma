@@ -1,0 +1,32 @@
+[project]
+name = "medgemma-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Ramakrishnan-235", email = "ramakrishnanti22@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "accelerate>=1.15.0",
+    "bitsandbytes>=0.50.2",
+    "huggingface-hub[cli]>=2.2.0",
+    "pillow>=13.0.0",
+    "transformers>=4.48.0",
+    "torch==2.14.1",
+]
+
+[project.scripts]
+medgemma-app = "medgemma_app:main"
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

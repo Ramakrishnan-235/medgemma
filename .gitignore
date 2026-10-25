@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Environment files
+.env
+.env.local
+*.env.local
+
+# Model checkpoints & large weights (local inference only)
+models/
+*.safetensors
+*.bin
+*.pt
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
