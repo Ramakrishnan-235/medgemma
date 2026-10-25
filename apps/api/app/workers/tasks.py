@@ -5,29 +5,27 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-try:
-    import pypdfium2 as pdfium
-except ImportError:
-    pdfium = None  # type: ignore
-
 import redis.asyncio as aioredis
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app.core.config import settings
 from app.core.storage import storage_adapter
 from app.db.models import AIRun, EvidenceChunk, SourceFile
 from app.db.session import AsyncSessionLocal
+from app.services.ehr_summarizer import TwoPassEHRSummarizer
 from app.services.embeddings import E5_MODEL_NAME, embed_passages_cpu, retrieve_case_evidence
 from app.services.medgemma_adapter import MedGemmaAdapter
+from app.services.pdf_ocr_pipeline import HybridPdfOcrExtractor, PARSER_VERSION
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger("celery_tasks")
 
-celery_app.conf.task_routes = {
+celery_app.conf.task_routes.update({
     "app.workers.tasks.ingest_source_file_task": {"queue": "bulk"},
     "app.workers.tasks.execute_grounded_qa_task": {"queue": "interactive"},
-}
+    "app.workers.tasks.execute_ehr_summary_task": {"queue": "interactive"},
+})
 
 
 async def publish_run_event(run_id: uuid.UUID, event_type: str, payload: dict) -> None:
@@ -44,72 +42,37 @@ async def publish_run_event(run_id: uuid.UUID, event_type: str, payload: dict) -
         logger.debug("Redis notification skipped: %s", exc)
 
 
-def extract_pdf_chunks_with_coords(raw_bytes: bytes) -> list[dict]:
+def _upload_page_previews_sync(
+    bucket: str,
+    workspace_id: uuid.UUID,
+    case_id: uuid.UUID,
+    source_id: uuid.UUID,
+    page_previews: dict[int, bytes],
+) -> dict[str, str]:
     """
-    Extracts text and normalized bounding-box coordinates from PDF bytes using pypdfium2.
+    Synchronously uploads page preview PNGs in a worker thread to avoid
+    blocking the async event loop.
     """
-    if pdfium is None:
-        return [
-            {
-                "page_or_frame": 1,
-                "bbox_norm": {"x0": 0.05, "y0": 0.0, "x1": 0.95, "y1": 1.0},
-                "section_type": "body",
-                "content_text": raw_bytes.decode("utf-8", errors="replace")[:1500],
-            }
-        ]
-
-    extracted: list[dict] = []
-    try:
-        doc = pdfium.PdfDocument(io.BytesIO(raw_bytes))
-        try:
-            for page_idx in range(len(doc)):
-                page = doc[page_idx]
-                try:
-                    textpage = page.get_textpage()
-                    try:
-                        full_text = textpage.get_text_range().strip()
-                        if not full_text:
-                            continue
-
-                        paragraphs = [p.strip() for p in full_text.split("\n\n") if len(p.strip()) > 20]
-                        if not paragraphs:
-                            paragraphs = [full_text]
-
-                        for idx, para in enumerate(paragraphs):
-                            y0 = round(idx / max(len(paragraphs), 1), 4)
-                            y1 = round(min((idx + 1) / max(len(paragraphs), 1), 1.0), 4)
-                            extracted.append(
-                                {
-                                    "page_or_frame": page_idx + 1,
-                                    "bbox_norm": {"x0": 0.05, "y0": y0, "x1": 0.95, "y1": y1},
-                                    "section_type": "body",
-                                    "content_text": para[:1500],
-                                }
-                            )
-                    finally:
-                        textpage.close()
-                finally:
-                    page.close()
-        finally:
-            doc.close()
-    except Exception as exc:
-        logger.warning("pypdfium2 parser error: %s; falling back to raw decode", exc)
-        if not extracted:
-            extracted.append(
-                {
-                    "page_or_frame": 1,
-                    "bbox_norm": {"x0": 0.05, "y0": 0.0, "x1": 0.95, "y1": 1.0},
-                    "section_type": "body",
-                    "content_text": raw_bytes.decode("utf-8", errors="replace")[:1500],
-                }
-            )
-
-    return extracted
+    preview_keys: dict[str, str] = {}
+    for page_num, png_bytes in page_previews.items():
+        preview_key = (
+            f"workspaces/{workspace_id}/cases/{case_id}/previews/"
+            f"{source_id}/page_{page_num}.png"
+        )
+        storage_adapter.internal_s3.put_object(
+            Bucket=bucket,
+            Key=preview_key,
+            Body=png_bytes,
+            ContentType="image/png",
+        )
+        preview_keys[str(page_num)] = preview_key
+    return preview_keys
 
 
 async def _ingest_source_file_async(
     workspace_id: uuid.UUID, case_id: uuid.UUID, source_file_id: uuid.UUID
 ) -> None:
+    extractor = HybridPdfOcrExtractor()
     async with AsyncSessionLocal() as db:
         stmt = select(SourceFile).where(
             SourceFile.id == source_file_id,
@@ -125,41 +88,71 @@ async def _ingest_source_file_async(
 
         try:
             raw_bytes = await asyncio.to_thread(storage_adapter.get_object_bytes, source.storage_key)
+
+            # Clear any prior chunks if re-parsing an existing source version
+            await db.execute(
+                delete(EvidenceChunk).where(EvidenceChunk.source_file_id == source.id)
+            )
+
             if source.file_kind == "pdf":
-                raw_chunks = await asyncio.to_thread(extract_pdf_chunks_with_coords, raw_bytes)
+                parsed_doc = await asyncio.to_thread(extractor.parse_pdf_bytes, raw_bytes)
+
+                # Offload page preview PNG uploads to worker thread to avoid event loop stalls
+                preview_keys = await asyncio.to_thread(
+                    _upload_page_previews_sync,
+                    storage_adapter.bucket,
+                    workspace_id,
+                    case_id,
+                    source.id,
+                    parsed_doc.page_previews_png,
+                )
+
+                chunk_specs = parsed_doc.chunks
+                source.parser_version = parsed_doc.parser_version
+                source.metadata_json = {
+                    **(source.metadata_json or {}),
+                    "page_count": parsed_doc.page_count,
+                    "encounter_date": parsed_doc.encounter_date_iso,
+                    "ocr_page_numbers": parsed_doc.ocr_page_numbers,
+                    "page_preview_keys": preview_keys,
+                }
             elif source.file_kind == "ehr_note":
                 text = raw_bytes.decode("utf-8", errors="replace").strip()
-                raw_chunks = [
-                    {
-                        "page_or_frame": 1,
-                        "bbox_norm": {"x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0},
-                        "section_type": "clinical_note",
-                        "content_text": text[:2000],
-                    }
+                from app.services.pdf_ocr_pipeline import ExtractedChunkSpec
+                chunk_specs = [
+                    ExtractedChunkSpec(
+                        page_or_frame=1,
+                        bbox_norm={"x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0},
+                        section_type="clinical_note",
+                        content_text=text[:2000],
+                        extraction_method="native_text",
+                    )
                 ]
             else:
-                raw_chunks = [
-                    {
-                        "page_or_frame": 1,
-                        "bbox_norm": {"x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0},
-                        "section_type": "imaging_metadata",
-                        "content_text": f"Imaging study file: {source.filename} ({source.file_kind})",
-                    }
+                from app.services.pdf_ocr_pipeline import ExtractedChunkSpec
+                chunk_specs = [
+                    ExtractedChunkSpec(
+                        page_or_frame=1,
+                        bbox_norm={"x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0},
+                        section_type="imaging_metadata",
+                        content_text=f"Imaging study file: {source.filename} ({source.file_kind})",
+                        extraction_method="native_text",
+                    )
                 ]
 
-            texts = [c["content_text"] for c in raw_chunks]
+            texts = [c.content_text for c in chunk_specs]
             embeddings = await asyncio.to_thread(embed_passages_cpu, texts)
 
-            for chunk_meta, vector in zip(raw_chunks, embeddings):
+            for spec, vector in zip(chunk_specs, embeddings):
                 db.add(
                     EvidenceChunk(
                         workspace_id=workspace_id,
                         case_id=case_id,
                         source_file_id=source.id,
-                        page_or_frame=chunk_meta["page_or_frame"],
-                        bbox_norm=chunk_meta["bbox_norm"],
-                        section_type=chunk_meta["section_type"],
-                        content_text=chunk_meta["content_text"],
+                        page_or_frame=spec.page_or_frame,
+                        bbox_norm=spec.bbox_norm,
+                        section_type=spec.section_type,
+                        content_text=spec.content_text,
                         embedding=vector,
                         embedding_model=E5_MODEL_NAME,
                     )
@@ -167,13 +160,13 @@ async def _ingest_source_file_async(
 
             source.parse_status = "ready"
             source.metadata_json = {
-                **source.metadata_json,
-                "chunk_count": len(raw_chunks),
+                **(source.metadata_json or {}),
+                "chunk_count": len(chunk_specs),
             }
             await db.commit()
         except Exception as exc:
             source.parse_status = "failed"
-            source.metadata_json = {**source.metadata_json, "error": str(exc)}
+            source.metadata_json = {**(source.metadata_json or {}), "error": str(exc)}
             await db.commit()
             raise
 
@@ -248,15 +241,85 @@ async def _execute_grounded_qa_async(
                 },
             )
         except Exception as exc:
-            run.status = "failed"
-            run.error_detail = str(exc)
+            try:
+                run.status = "failed"
+                run.error_detail = str(exc)
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                await publish_run_event(
+                    run.id,
+                    "failed",
+                    {"status": "failed", "error_detail": str(exc)},
+                )
+            except Exception as inner_exc:
+                logger.warning("Could not persist failed state for QA run %s: %s", run_id, inner_exc)
+            raise
+
+
+async def _execute_ehr_summary_async(
+    workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
+) -> None:
+    summarizer = TwoPassEHRSummarizer()
+    async with AsyncSessionLocal() as db:
+        stmt = select(AIRun).where(
+            AIRun.id == run_id,
+            AIRun.case_id == case_id,
+            AIRun.workspace_id == workspace_id,
+        )
+        run = (await db.execute(stmt)).scalar_one_or_none()
+        if run is None or run.status == "cancelled":
+            return
+
+        run.status = "running"
+        await db.commit()
+        await publish_run_event(
+            run.id,
+            "status",
+            {"status": "running", "stage": "pass1_extracting_chronological_facts"},
+        )
+
+        try:
+            summary_payload = await summarizer.execute_two_pass_summary(
+                db=db,
+                workspace_id=workspace_id,
+                case_id=case_id,
+                selected_source_ids=run.input_source_ids or None,
+            )
+
+            try:
+                await db.refresh(run)
+                if run.status == "cancelled":
+                    return
+            except ObjectDeletedError:
+                return
+
+            output_dict = summary_payload.model_dump(mode="json")
+            run.status = "completed"
+            run.output_json = output_dict
+            run.metrics_json = summary_payload.telemetry
             run.completed_at = datetime.now(timezone.utc)
             await db.commit()
+
             await publish_run_event(
                 run.id,
-                "failed",
-                {"status": "failed", "error_detail": str(exc)},
+                "completed",
+                {
+                    "status": "completed",
+                    "output_json": output_dict,
+                    "metrics_json": summary_payload.telemetry,
+                },
             )
+        except Exception as exc:
+            try:
+                run.status = "failed"
+                run.error_detail = str(exc)
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                await publish_run_event(
+                    run.id, "failed", {"status": "failed", "error_detail": str(exc)}
+                )
+            except Exception as inner_exc:
+                logger.warning("Could not persist failed state for EHR run %s: %s", run_id, inner_exc)
             raise
 
 
@@ -273,6 +336,15 @@ def ingest_source_file_task(workspace_id: str, case_id: str, source_file_id: str
 def execute_grounded_qa_task(workspace_id: str, case_id: str, run_id: str) -> None:
     asyncio.run(
         _execute_grounded_qa_async(
+            uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
+        )
+    )
+
+
+@celery_app.task(name="app.workers.tasks.execute_ehr_summary_task")
+def execute_ehr_summary_task(workspace_id: str, case_id: str, run_id: str) -> None:
+    asyncio.run(
+        _execute_ehr_summary_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
         )
     )
