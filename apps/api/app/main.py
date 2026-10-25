@@ -1,4 +1,6 @@
+import asyncio
 from contextlib import asynccontextmanager
+import logging
 from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,11 +8,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.session import engine
 
+logger = logging.getLogger("uvicorn")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup: ensure connections / telemetry initialized
+    # Startup: ensure S3 private storage bucket exists
+    try:
+        from app.core.storage import storage_adapter
+        await asyncio.to_thread(storage_adapter.ensure_bucket_exists)
+    except Exception as exc:
+        logger.warning("Could not auto-verify S3 bucket on startup: %s", exc)
+
     yield
+
     # Shutdown: gracefully close PostgreSQL connection pool
     await engine.dispose()
 
@@ -51,3 +62,12 @@ async def system_info() -> dict[str, str]:
         "processor_version": settings.MEDGEMMA_PROCESSOR_VERSION,
         "gpu_service_url": settings.MEDGEMMA_SERVICE_URL,
     }
+
+
+from app.api.v1 import api_v1_router
+
+# Standard /api/v1 routes documented in OpenAPI /docs
+app.include_router(api_v1_router, prefix="/api")
+
+# Direct /v1 routes for Caddy handle_path reverse proxy, excluded from schema to avoid duplicate operation IDs
+app.include_router(api_v1_router, include_in_schema=False)

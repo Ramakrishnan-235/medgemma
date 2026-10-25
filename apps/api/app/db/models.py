@@ -6,13 +6,27 @@ try:
     from pgvector.sqlalchemy import VECTOR
 except ImportError:
     from sqlalchemy.types import UserDefinedType
+    from sqlalchemy.sql.operators import custom_op
+
+    class VectorComparator(UserDefinedType.Comparator):  # type: ignore[name-defined]
+        def cosine_distance(self, other: Any) -> Any:
+            return custom_op("<=>")(self.expr, other)
+
+        def l2_distance(self, other: Any) -> Any:
+            return custom_op("<->")(self.expr, other)
+
+        def max_inner_product(self, other: Any) -> Any:
+            return custom_op("<#>")(self.expr, other)
 
     class VECTOR(UserDefinedType):  # type: ignore[no-redef]
+        comparator_factory = VectorComparator
+
         def __init__(self, dim: int = 384):
             self.dim = dim
 
         def get_col_spec(self, **kw: Any) -> str:
             return f"vector({self.dim})"
+
 
 from sqlalchemy import (
     BigInteger,

@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import dataclass
-from fastapi import Depends, HTTPException, status
+from typing import Optional
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +10,7 @@ from app.core.security import verify_better_auth_jwt
 from app.db.models import Case
 from app.db.session import get_db
 
-bearer_scheme = HTTPBearer(auto_error=True)
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,24 @@ class AuthenticatedPrincipal:
 
 
 async def get_current_principal(
-    creds: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    request: Request,
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> AuthenticatedPrincipal:
-    claims = await verify_better_auth_jwt(creds.credentials)
+    token: Optional[str] = None
+    if creds and creds.credentials:
+        token = creds.credentials
+    else:
+        # Support EventSource (SSE) where browsers cannot send Authorization header
+        token = request.query_params.get("token")
+
+    if not token or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    claims = await verify_better_auth_jwt(token)
     try:
         user_id = uuid.UUID(str(claims["sub"]))
         workspace_id = uuid.UUID(str(claims["workspace_id"]))
