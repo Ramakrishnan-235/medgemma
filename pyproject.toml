@@ -24,6 +24,8 @@ dependencies = [
     "pyjwt[crypto]>=2.8.0",
     "greenlet>=3.0.0",
     "pydicom>=3.0.2",
+    "celery>=5.3.6",
+    "reportlab>=4.2.2",
 ]
 
 [project.scripts]
@@ -40,3 +42,10 @@ torch = { index = "pytorch-cu126" }
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.1",
+]

@@ -92,11 +92,17 @@ async def create_immutable_report_version(
     db: AsyncSession = Depends(get_db),
 ) -> ReportVersionResponse:
     raw_chips = extract_citation_chips_from_tiptap(req.tiptap_doc_json)
-    chunk_ids = {
-        uuid.UUID(str(c["evidenceChunkId"]))
-        for c in raw_chips
-        if c.get("evidenceChunkId")
-    }
+    chunk_ids: set[uuid.UUID] = set()
+    for c in raw_chips:
+        raw_id = c.get("evidenceChunkId")
+        if raw_id:
+            try:
+                chunk_ids.add(uuid.UUID(str(raw_id)))
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid evidenceChunkId UUID format: '{raw_id}'",
+                )
 
     # Verify every cited EvidenceChunk belongs strictly to this case & workspace
     verified_Snapshots: list[dict[str, Any]] = []

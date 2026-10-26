@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
+    "type-check": "tsc --noEmit",
     "start": "next start",
     "server": "node server.js"
   },

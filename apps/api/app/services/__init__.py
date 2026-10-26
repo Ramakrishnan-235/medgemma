@@ -19,6 +19,18 @@ from app.services.xray_analyzer import (
     XrayObservationSection,
 )
 
+from app.services.hybrid_retrieval import (
+    RetrievalEvalMetrics,
+    evaluate_retrieval_predictions,
+    retrieve_case_evidence_hybrid_rrf,
+)
+from app.services.volumetric_extension import (
+    SampledVolumetricSlab,
+    VolumetricModality,
+    VolumetricSeriesAdapter,
+    VolumetricSeriesDescriptor,
+)
+
 __all__ = [
     "MedGemmaAdapter",
     "VerifiedCitation",
@@ -34,5 +46,12 @@ __all__ = [
     "LongitudinalXrayPayload",
     "XrayObservationSection",
     "LongitudinalIntervalChange",
+    "retrieve_case_evidence_hybrid_rrf",
+    "evaluate_retrieval_predictions",
+    "RetrievalEvalMetrics",
+    "VolumetricModality",
+    "VolumetricSeriesDescriptor",
+    "SampledVolumetricSlab",
+    "VolumetricSeriesAdapter",
 ]
 
