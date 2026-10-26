@@ -11,11 +11,12 @@ from sqlalchemy.orm.exc import ObjectDeletedError
 
 from app.core.config import settings
 from app.core.storage import storage_adapter
-from app.db.models import AIRun, EvidenceChunk, SourceFile
+from app.db.models import AIRun, Case, EvidenceChunk, ReportVersion, SourceFile
 from app.db.session import AsyncSessionLocal
 from app.services.ehr_summarizer import TwoPassEHRSummarizer
 from app.services.embeddings import E5_MODEL_NAME, embed_passages_cpu, retrieve_case_evidence
 from app.services.medgemma_adapter import MedGemmaAdapter
+from app.services.pdf_exporter import render_clinical_report_pdf
 from app.services.pdf_ocr_pipeline import HybridPdfOcrExtractor, PARSER_VERSION
 from app.services.xray_analyzer import ChestXrayAnalysisService
 from app.workers.celery_app import celery_app
@@ -28,6 +29,7 @@ celery_app.conf.task_routes.update({
     "app.workers.tasks.execute_ehr_summary_task": {"queue": "interactive"},
     "app.workers.tasks.execute_xray_analysis_task": {"queue": "interactive"},
     "app.workers.tasks.execute_longitudinal_xray_task": {"queue": "interactive"},
+    "app.workers.tasks.export_report_pdf_task": {"queue": "interactive"},
 })
 
 
@@ -563,6 +565,86 @@ def execute_longitudinal_xray_task(workspace_id: str, case_id: str, run_id: str)
     asyncio.run(
         _execute_longitudinal_xray_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
+        )
+    )
+
+
+async def _export_report_pdf_async(
+    workspace_id: uuid.UUID, case_id: uuid.UUID, report_version_id: uuid.UUID
+) -> None:
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(ReportVersion, Case)
+            .join(Case, ReportVersion.case_id == Case.id)
+            .where(
+                ReportVersion.id == report_version_id,
+                ReportVersion.case_id == case_id,
+                ReportVersion.workspace_id == workspace_id,
+            )
+        )
+        row = (await db.execute(stmt)).first()
+        if row is None:
+            return
+        report_ver, case = row
+
+        src_stmt = select(SourceFile).where(
+            SourceFile.case_id == case.id,
+            SourceFile.workspace_id == workspace_id,
+        )
+        sources_map = {
+            str(s.id): {"filename": s.filename, "sha256_hash": s.sha256_hash}
+            for s in (await db.execute(src_stmt)).scalars().all()
+        }
+
+        run_meta: dict | None = None
+        if report_ver.source_run_id:
+            run_row = (
+                await db.execute(select(AIRun).where(AIRun.id == report_ver.source_run_id))
+            ).scalar_one_or_none()
+            if run_row:
+                run_meta = {
+                    "model_checkpoint": run_row.model_checkpoint,
+                    "processor_version": run_row.processor_version,
+                    "prompt_template_version": run_row.prompt_template_version,
+                }
+
+        pdf_bytes = await asyncio.to_thread(
+            render_clinical_report_pdf,
+            case_title=case.title,
+            patient_code=case.patient_code,
+            version_number=report_ver.version_number,
+            reviewed_by_str=str(report_ver.reviewed_by or report_ver.created_by),
+            tiptap_doc=report_ver.tiptap_doc_json,
+            citations_snapshot=report_ver.citations_snapshot_json,
+            source_files_map=sources_map,
+            run_metadata=run_meta,
+        )
+
+        export_key = (
+            f"workspaces/{workspace_id}/cases/{case_id}/exports/"
+            f"report_v{report_ver.version_number}_{report_ver.id}.pdf"
+        )
+        storage_adapter.internal_s3.put_object(
+            Bucket=storage_adapter.bucket,
+            Key=export_key,
+            Body=pdf_bytes,
+            ContentType="application/pdf",
+        )
+
+        report_ver.export_storage_key = export_key
+        report_ver.review_status = "exported"
+        await db.commit()
+
+
+@celery_app.task(name="app.workers.tasks.export_report_pdf_task")
+def export_report_pdf_task(
+    workspace_id: str, case_id: str, report_version_id: str
+) -> None:
+    asyncio.run(
+        _export_report_pdf_async(
+            uuid.UUID(workspace_id),
+            uuid.UUID(case_id),
+            uuid.UUID(report_version_id),
         )
     )
 

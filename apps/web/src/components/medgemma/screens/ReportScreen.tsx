@@ -1,0 +1,407 @@
+"use client";
+
+import React, { useState } from "react";
+import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
+import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
+import { Icon } from "../Icons";
+
+import { ClinicalReportEditor, type ReportVersionRecord } from "@/components/editor/ClinicalReportEditor";
+
+export function ReportScreen() {
+  const { showToast, setPage } = useWorkspaceStore();
+
+  const [editorMode, setEditorMode] = useState<"tiptap" | "sections">("tiptap");
+
+  // Initial immutable report version history for Case 024
+  const [versions, setVersions] = useState<ReportVersionRecord[]>([
+    {
+      id: "ver-1",
+      version_number: 1,
+      review_status: "draft",
+      created_at: new Date().toISOString(),
+      tiptap_doc_json: {
+        type: "doc",
+        content: [
+          {
+            type: "heading",
+            attrs: { level: 3 },
+            content: [{ type: "text", text: "CHEST IMAGING REPORT — CASE 024" }],
+          },
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "TECHNIQUE: Multidetector helical axial CT imaging of the thorax performed without intravenous contrast. Scans were reconstructed at 1.0 mm slice intervals and reviewed alongside baseline prior CT study dated 21 Jul 2026 ",
+              },
+              {
+                type: "citationChip",
+                attrs: {
+                  citationId: "cit_1",
+                  evidenceChunkId: "chunk-prior-001",
+                  sourceFileId: "prior-study-001",
+                  pageOrFrame: 1,
+                  bboxNorm: { x0: 0.15, y0: 0.25, x1: 0.45, y1: 0.55 },
+                  verbatimQuote: "Prior baseline chest CT study from 21 Jul 2026",
+                },
+              },
+              { type: "text", text: "." },
+            ],
+          },
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "FINDINGS: Right lower lobe consolidation demonstrates interval resolution compared to prior imaging ",
+              },
+              {
+                type: "citationChip",
+                attrs: {
+                  citationId: "cit_2",
+                  evidenceChunkId: "chunk-curr-002",
+                  sourceFileId: "current-study-002",
+                  pageOrFrame: 124,
+                  bboxNorm: { x0: 0.55, y0: 0.6, x1: 0.78, y1: 0.85 },
+                  verbatimQuote: "Right lower lobe consolidation on axial series slice 124",
+                },
+              },
+              {
+                type: "text",
+                text: ". No pleural effusion or pneumothorax is identified. Heart size and mediastinal contours are within normal limits. Trachea and central bronchi are widely patent.",
+              },
+            ],
+          },
+          {
+            type: "paragraph",
+            content: [
+              {
+                type: "text",
+                text: "IMPRESSION: Interval clearance and marked radiographic improvement of right lower lobe consolidation, consistent with resolved pneumonia. No suspicious pulmonary mass or acute cardiopulmonary abnormality.",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ]);
+
+  const [activeVersionNumber, setActiveVersionNumber] = useState(1);
+  const activeVersion =
+    versions.find((v) => v.version_number === activeVersionNumber) ||
+    versions[0];
+
+  const handleSaveNewVersion = async (
+    tiptapJson: Record<string, unknown>
+  ) => {
+    const nextVer =
+      Math.max(...versions.map((v) => v.version_number), 0) + 1;
+    const newRecord: ReportVersionRecord = {
+      id: `ver-${nextVer}`,
+      version_number: nextVer,
+      review_status: "draft",
+      tiptap_doc_json: tiptapJson,
+      created_at: new Date().toISOString(),
+    };
+    setVersions([newRecord, ...versions]);
+    setActiveVersionNumber(nextVer);
+    showToast(`Saved immutable report draft as v${nextVer}.`);
+  };
+
+  const handleMarkReviewed = async (versionNumber: number) => {
+    setVersions((prev) =>
+      prev.map((v) =>
+        v.version_number === versionNumber
+          ? { ...v, review_status: "reviewed", reviewed_by: "Dr. Morgan" }
+          : v
+      )
+    );
+    showToast(`Report v${versionNumber} approved and marked reviewed.`);
+  };
+
+  const handleExportPdf = async (versionNumber: number) => {
+    const reportText = JSON.stringify(activeVersion.tiptap_doc_json, null, 2);
+    const blob = new Blob([reportText], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `medgemma-report-v${versionNumber}-provenance.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    setVersions((prev) =>
+      prev.map((v) =>
+        v.version_number === versionNumber
+          ? {
+              ...v,
+              review_status: "exported",
+              export_download_url: url,
+            }
+          : v
+      )
+    );
+    showToast(
+      `Triggered worker PDF export for reviewed report v${versionNumber}. Provenance appendix included.`
+    );
+  };
+
+  const [technique, setTechnique] = useState(
+    "[Confirm modality, acquisition protocol, and comparison studies from the source metadata.]"
+  );
+  const [findings, setFindings] = useState(
+    "[Review the source images. Add observations with the relevant series, slice and anatomical location.]"
+  );
+  const [impression, setImpression] = useState(
+    "[Add a concise, reviewed interpretation supported by the findings.]"
+  );
+  const [limitations, setLimitations] = useState(
+    "This is a UI demonstration. No medical analysis was performed. Schematic images must not be interpreted clinically."
+  );
+
+  const [checkedItems, setCheckedItems] = useState({
+    images: false,
+    findings: false,
+    limitations: false,
+  });
+
+  const handleSave = () => {
+    showToast("Saved in this design preview. No backend is connected.");
+  };
+
+  const handleExport = () => {
+    const reportText = `MEDGEMMA UI DEMONSTRATION — UNREVIEWED DRAFT
+Fictional case. No medical analysis performed.
+
+TECHNIQUE
+${technique}
+
+FINDINGS
+${findings}
+
+IMPRESSION
+${impression}
+
+LIMITATIONS
+${limitations}`;
+
+    const blob = new Blob([reportText], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "medgemma-demo-report-draft.txt";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    showToast("Exported the explicitly labeled demo draft.");
+  };
+
+  return (
+    <>
+      <Heading
+        eyebrow="REPORTS / DRAFT STUDIO"
+        title="From observation to a clear report."
+        desc="An editable draft, with the evidence close at hand."
+        actions={
+          <>
+            <div className="tabs" style={{ marginRight: 6 }}>
+              <button
+                type="button"
+                className={editorMode === "tiptap" ? "selected" : ""}
+                onClick={() => setEditorMode("tiptap")}
+              >
+                Tiptap Rich Editor
+              </button>
+              <button
+                type="button"
+                className={editorMode === "sections" ? "selected" : ""}
+                onClick={() => setEditorMode("sections")}
+              >
+                Structured Sections
+              </button>
+            </div>
+            <button type="button" className="btn" onClick={handleSave}>
+              <Icon name="check" /> Save draft
+            </button>
+            <button
+              type="button"
+              className="btn black"
+              onClick={handleExport}
+            >
+              <Icon name="download" /> Export draft
+            </button>
+          </>
+        }
+      />
+
+      <ContextBar />
+
+      <div className="cols wide-left">
+        {editorMode === "tiptap" ? (
+          /* Tiptap Versioned Clinical Editor with Atomic Citation Chips */
+          <div className="flex flex-col gap-4">
+            <ClinicalReportEditor
+              caseId="024"
+              versions={versions}
+              activeVersion={activeVersion}
+              onSelectVersion={(num) => setActiveVersionNumber(num)}
+              onSaveNewVersion={handleSaveNewVersion}
+              onMarkReviewed={handleMarkReviewed}
+              onExportPdf={handleExportPdf}
+              onOpenPdfCitation={(attrs) => {
+                showToast(
+                  `Navigating to cited evidence: ${attrs.citationId} (${attrs.sourceFileId} p.${attrs.pageOrFrame})`
+                );
+                setPage("imaging");
+              }}
+            />
+          </div>
+        ) : (
+          /* Main Structured Sectional Form */
+          <article className="panel report">
+            <div className="row between">
+              <span className="eyebrow">IMAGING REPORT</span>
+              <Badge text="AI draft · Unreviewed" variant="dash" />
+            </div>
+            <h2 className="doc-title">Chest imaging report</h2>
+            <p className="muted small">Case 024 · Demo · Version 1</p>
+
+            <div className="divider" />
+
+            <label className="field">
+              Template
+              <select aria-label="Report template">
+                <option>Structured imaging report</option>
+                <option>Clinical summary</option>
+              </select>
+            </label>
+
+            <label className="field">
+              Technique
+              <textarea
+                id="report-technique"
+                value={technique}
+                onChange={(e) => setTechnique(e.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              Findings
+              <textarea
+                id="report-findings"
+                value={findings}
+                onChange={(e) => setFindings(e.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              Impression
+              <textarea
+                id="report-impression"
+                value={impression}
+                onChange={(e) => setImpression(e.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              Limitations
+              <textarea
+                id="report-limitations"
+                value={limitations}
+                onChange={(e) => setLimitations(e.target.value)}
+              />
+            </label>
+          </article>
+        )}
+
+        {/* Evidence & Checklist Sidebar */}
+        <aside className="stack" style={{ alignContent: "start" }}>
+          {/* Linked Evidence Section */}
+          <section className="panel panel-pad">
+            <h2>Evidence</h2>
+            <div className="listitem">
+              <div>
+                <p>Current CT study</p>
+                <small>24 Oct 2026 · Demo</small>
+                <div>
+                  <SourceChip label="Series 01" />
+                </div>
+              </div>
+              <Icon name="scan" />
+            </div>
+
+            <div className="listitem">
+              <div>
+                <p>Prior CT study</p>
+                <small>21 Jul 2026 · Demo</small>
+                <div>
+                  <SourceChip label="Comparison source" />
+                </div>
+              </div>
+              <Icon name="scan" />
+            </div>
+
+            <div className="listitem">
+              <div>
+                <p>Clinical note</p>
+                <small>1 page · Demo</small>
+                <div>
+                  <SourceChip label="Clinical note · p. 1" />
+                </div>
+              </div>
+              <Icon name="file" />
+            </div>
+          </section>
+
+          {/* Pre-export Checklist */}
+          <section className="panel panel-pad checklist">
+            <h2>Before you export</h2>
+            <div style={{ marginTop: "12px" }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={checkedItems.images}
+                  onChange={(e) =>
+                    setCheckedItems((prev) => ({
+                      ...prev,
+                      images: e.target.checked,
+                    }))
+                  }
+                />
+                <span>Source images and context checked</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={checkedItems.findings}
+                  onChange={(e) =>
+                    setCheckedItems((prev) => ({
+                      ...prev,
+                      findings: e.target.checked,
+                    }))
+                  }
+                />
+                <span>Findings and impression reviewed</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={checkedItems.limitations}
+                  onChange={(e) =>
+                    setCheckedItems((prev) => ({
+                      ...prev,
+                      limitations: e.target.checked,
+                    }))
+                  }
+                />
+                <span>Limitations included</span>
+              </label>
+            </div>
+            <div className="note" style={{ marginTop: "16px" }}>
+              The prototype exports an explicitly labeled text draft. Review state remains a demo.
+            </div>
+          </section>
+        </aside>
+      </div>
+    </>
+  );
+}

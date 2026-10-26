@@ -20,6 +20,7 @@ import {
   useImagingStore,
   type NormalizedBox,
   type StudyAnnotation,
+  type ViewerToolMode,
 } from "@/stores/useImagingStore";
 
 interface ChestXrayViewportProps {
