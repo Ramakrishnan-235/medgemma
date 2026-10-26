@@ -211,3 +211,38 @@ class ReportVersion(Base):
     __table_args__ = (
         UniqueConstraint("case_id", "version_number", name="uq_report_case_version"),
     )
+
+
+class ImageAnnotation(Base):
+    """
+    Stores manual clinician annotations and feature-flagged MedGemma 1.5 localization boxes.
+    bbox_norm is always stored in the ORIGINAL unpadded image coordinate space [0.0 .. 1.0].
+    """
+    __tablename__ = "image_annotations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ai_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ai_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    frame_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")  # manual | model_medgemma
+    anatomical_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    finding_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Top-left normalized coordinates on the original unpadded image: {"x0": 0.18, "y0": 0.32, "x1": 0.44, "y1": 0.61}
+    bbox_norm: Mapped[dict[str, float]] = mapped_column(JSONB, nullable=False)
+    review_state: Mapped[str] = mapped_column(String(32), nullable=False, default="accepted")  # pending_review | accepted | rejected
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_annotation_workspace_case", "workspace_id", "case_id"),
+        Index("idx_annotation_case_source", "case_id", "source_file_id"),
+    )
+

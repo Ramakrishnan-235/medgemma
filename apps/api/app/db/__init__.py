@@ -3,6 +3,7 @@ from app.db.models import (
     Base,
     Case,
     EvidenceChunk,
+    ImageAnnotation,
     JobOutbox,
     ReportVersion,
     SourceFile,
@@ -14,6 +15,7 @@ __all__ = [
     "Case",
     "SourceFile",
     "EvidenceChunk",
+    "ImageAnnotation",
     "AIRun",
     "JobOutbox",
     "ReportVersion",
@@ -21,3 +23,4 @@ __all__ = [
     "AsyncSessionLocal",
     "get_db",
 ]
+

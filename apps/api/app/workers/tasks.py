@@ -17,6 +17,7 @@ from app.services.ehr_summarizer import TwoPassEHRSummarizer
 from app.services.embeddings import E5_MODEL_NAME, embed_passages_cpu, retrieve_case_evidence
 from app.services.medgemma_adapter import MedGemmaAdapter
 from app.services.pdf_ocr_pipeline import HybridPdfOcrExtractor, PARSER_VERSION
+from app.services.xray_analyzer import ChestXrayAnalysisService
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger("celery_tasks")
@@ -25,7 +26,10 @@ celery_app.conf.task_routes.update({
     "app.workers.tasks.ingest_source_file_task": {"queue": "bulk"},
     "app.workers.tasks.execute_grounded_qa_task": {"queue": "interactive"},
     "app.workers.tasks.execute_ehr_summary_task": {"queue": "interactive"},
+    "app.workers.tasks.execute_xray_analysis_task": {"queue": "interactive"},
+    "app.workers.tasks.execute_longitudinal_xray_task": {"queue": "interactive"},
 })
+
 
 
 async def publish_run_event(run_id: uuid.UUID, event_type: str, payload: dict) -> None:
@@ -128,6 +132,55 @@ async def _ingest_source_file_async(
                         extraction_method="native_text",
                     )
                 ]
+            elif source.file_kind in ("dicom", "image_png") or source.filename.lower().endswith((".dcm", ".png", ".jpg", ".jpeg")):
+                from app.services.dicom_xray_pipeline import ChestXrayPreprocessor
+                from app.services.pdf_ocr_pipeline import ExtractedChunkSpec
+
+                preprocessor = ChestXrayPreprocessor()
+                if source.file_kind == "dicom" or source.filename.lower().endswith(".dcm"):
+                    normalized = await asyncio.to_thread(preprocessor.normalize_dicom_bytes, raw_bytes)
+                else:
+                    normalized = await asyncio.to_thread(preprocessor.normalize_standard_image_bytes, raw_bytes)
+
+                display_key = f"workspaces/{workspace_id}/cases/{case_id}/imaging/{source.id}/display.png"
+                medgemma_key = f"workspaces/{workspace_id}/cases/{case_id}/imaging/{source.id}/medgemma_896.png"
+
+                await asyncio.to_thread(
+                    storage_adapter.internal_s3.put_object,
+                    Bucket=storage_adapter.bucket,
+                    Key=display_key,
+                    Body=normalized.display_png_bytes,
+                    ContentType="image/png",
+                )
+                await asyncio.to_thread(
+                    storage_adapter.internal_s3.put_object,
+                    Bucket=storage_adapter.bucket,
+                    Key=medgemma_key,
+                    Body=normalized.medgemma_896_png_bytes,
+                    ContentType="image/png",
+                )
+
+                view_pos = normalized.dicom_metadata.get("view_position", "UNKNOWN")
+                enc_date = normalized.dicom_metadata.get("encounter_date") or "Undated"
+
+                source.metadata_json = {
+                    **(source.metadata_json or {}),
+                    **normalized.dicom_metadata,
+                    "display_png_key": display_key,
+                    "medgemma_896_key": medgemma_key,
+                    "encounter_date": normalized.dicom_metadata.get("encounter_date"),
+                    "view_position": view_pos,
+                }
+
+                chunk_specs = [
+                    ExtractedChunkSpec(
+                        page_or_frame=1,
+                        bbox_norm={"x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0},
+                        section_type="imaging_metadata",
+                        content_text=f"Chest X-Ray ({view_pos}, {enc_date}): {source.filename}",
+                        extraction_method="dicom_normalization",
+                    )
+                ]
             else:
                 from app.services.pdf_ocr_pipeline import ExtractedChunkSpec
                 chunk_specs = [
@@ -139,6 +192,7 @@ async def _ingest_source_file_async(
                         extraction_method="native_text",
                     )
                 ]
+
 
             texts = [c.content_text for c in chunk_specs]
             embeddings = await asyncio.to_thread(embed_passages_cpu, texts)
@@ -348,3 +402,167 @@ def execute_ehr_summary_task(workspace_id: str, case_id: str, run_id: str) -> No
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
         )
     )
+
+
+async def _execute_xray_analysis_async(
+    workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
+) -> None:
+    service = ChestXrayAnalysisService()
+    async with AsyncSessionLocal() as db:
+        stmt = select(AIRun).where(
+            AIRun.id == run_id,
+            AIRun.case_id == case_id,
+            AIRun.workspace_id == workspace_id,
+        )
+        run = (await db.execute(stmt)).scalar_one_or_none()
+        if run is None or run.status == "cancelled":
+            return
+
+        run.status = "running"
+        await db.commit()
+        await publish_run_event(
+            run.id, "status", {"status": "running", "stage": "analyzing_chest_xray"}
+        )
+
+        try:
+            source_id = uuid.UUID(run.input_payload_json["source_file_id"])
+            indication = run.input_payload_json.get(
+                "clinical_indication", "Routine chest radiograph evaluation."
+            )
+            result = await service.execute_single_xray_analysis(
+                db=db,
+                workspace_id=workspace_id,
+                case_id=case_id,
+                source_file_id=source_id,
+                user_id=run.created_by,
+                clinical_indication=indication,
+                ai_run_id=run.id,
+            )
+
+            try:
+                await db.refresh(run)
+                if run.status == "cancelled":
+                    return
+            except ObjectDeletedError:
+                return
+
+            output_dict = result.model_dump(mode="json")
+            run.status = "completed"
+            run.output_json = output_dict
+            run.metrics_json = result.telemetry
+            run.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            await publish_run_event(
+                run.id,
+                "completed",
+                {
+                    "status": "completed",
+                    "output_json": output_dict,
+                    "metrics_json": result.telemetry,
+                },
+            )
+        except Exception as exc:
+            try:
+                run.status = "failed"
+                run.error_detail = str(exc)
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                await publish_run_event(
+                    run.id, "failed", {"status": "failed", "error_detail": str(exc)}
+                )
+            except Exception as inner_exc:
+                logger.warning("Could not persist failed state for X-ray run %s: %s", run_id, inner_exc)
+            raise
+
+
+async def _execute_longitudinal_xray_async(
+    workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
+) -> None:
+    service = ChestXrayAnalysisService()
+    async with AsyncSessionLocal() as db:
+        stmt = select(AIRun).where(
+            AIRun.id == run_id,
+            AIRun.case_id == case_id,
+            AIRun.workspace_id == workspace_id,
+        )
+        run = (await db.execute(stmt)).scalar_one_or_none()
+        if run is None or run.status == "cancelled":
+            return
+
+        run.status = "running"
+        await db.commit()
+        await publish_run_event(
+            run.id, "status", {"status": "running", "stage": "comparing_longitudinal_xrays"}
+        )
+
+        try:
+            prior_id = uuid.UUID(run.input_payload_json["prior_source_file_id"])
+            curr_id = uuid.UUID(run.input_payload_json["current_source_file_id"])
+            question = run.input_payload_json.get(
+                "clinical_question",
+                "Evaluate interval change between prior and current chest radiographs.",
+            )
+            result = await service.execute_longitudinal_comparison(
+                db=db,
+                workspace_id=workspace_id,
+                case_id=case_id,
+                prior_source_file_id=prior_id,
+                current_source_file_id=curr_id,
+                clinical_question=question,
+            )
+
+            try:
+                await db.refresh(run)
+                if run.status == "cancelled":
+                    return
+            except ObjectDeletedError:
+                return
+
+            output_dict = result.model_dump(mode="json")
+            run.status = "completed"
+            run.output_json = output_dict
+            run.metrics_json = result.telemetry
+            run.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            await publish_run_event(
+                run.id,
+                "completed",
+                {
+                    "status": "completed",
+                    "output_json": output_dict,
+                    "metrics_json": result.telemetry,
+                },
+            )
+        except Exception as exc:
+            try:
+                run.status = "failed"
+                run.error_detail = str(exc)
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                await publish_run_event(
+                    run.id, "failed", {"status": "failed", "error_detail": str(exc)}
+                )
+            except Exception as inner_exc:
+                logger.warning("Could not persist failed state for longitudinal X-ray run %s: %s", run_id, inner_exc)
+            raise
+
+
+@celery_app.task(name="app.workers.tasks.execute_xray_analysis_task")
+def execute_xray_analysis_task(workspace_id: str, case_id: str, run_id: str) -> None:
+    asyncio.run(
+        _execute_xray_analysis_async(
+            uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
+        )
+    )
+
+
+@celery_app.task(name="app.workers.tasks.execute_longitudinal_xray_task")
+def execute_longitudinal_xray_task(workspace_id: str, case_id: str, run_id: str) -> None:
+    asyncio.run(
+        _execute_longitudinal_xray_async(
+            uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
+        )
+    )
+
