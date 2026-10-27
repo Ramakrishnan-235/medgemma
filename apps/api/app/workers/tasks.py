@@ -1,18 +1,16 @@
 import asyncio
-import io
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from sqlalchemy import delete, select
-from sqlalchemy.orm.exc import ObjectDeletedError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.storage import storage_adapter
 from app.db.models import AIRun, Case, EvidenceChunk, ReportVersion, SourceFile
-from app.db.session import AsyncSessionLocal
+from app.db.session import AsyncSessionLocal, dispose_engine
 from app.services.ehr_summarizer import TwoPassEHRSummarizer
 from app.services.embeddings import E5_MODEL_NAME, embed_passages_cpu, retrieve_case_evidence
 from app.services.medgemma_adapter import MedGemmaAdapter
@@ -20,6 +18,7 @@ from app.services.pdf_exporter import render_clinical_report_pdf
 from app.services.pdf_ocr_pipeline import HybridPdfOcrExtractor, PARSER_VERSION
 from app.services.xray_analyzer import ChestXrayAnalysisService
 from app.workers.celery_app import celery_app
+from app.workers.run_lifecycle import RunOperation, RunResult, execute_ai_run
 
 logger = logging.getLogger("celery_tasks")
 
@@ -42,10 +41,21 @@ async def publish_run_event(run_id: uuid.UUID, event_type: str, payload: dict) -
     try:
         r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         message = json.dumps({"event": event_type, "run_id": str(run_id), **payload})
-        await r.publish(f"run_events:{run_id}", message)
-        await r.aclose()
+        try:
+            await r.publish(f"run_events:{run_id}", message)
+        finally:
+            await r.aclose()
     except Exception as exc:
         logger.debug("Redis notification skipped: %s", exc)
+
+
+def _run_worker_task(coro):
+    async def _runner():
+        try:
+            return await coro
+        finally:
+            await dispose_engine()
+    return asyncio.run(_runner())
 
 
 def _upload_page_previews_sync(
@@ -227,161 +237,62 @@ async def _ingest_source_file_async(
             raise
 
 
+async def _execute_run_async(
+    workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID,
+    *, stage: str, operation: RunOperation,
+) -> None:
+    async with AsyncSessionLocal() as db:
+        await execute_ai_run(
+            db, workspace_id, case_id, run_id,
+            stage=stage, operation=operation, publish=publish_run_event,
+        )
+
+
 async def _execute_grounded_qa_async(
     workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
 ) -> None:
-    adapter = MedGemmaAdapter()
-    async with AsyncSessionLocal() as db:
-        stmt = select(AIRun).where(
-            AIRun.id == run_id,
-            AIRun.case_id == case_id,
-            AIRun.workspace_id == workspace_id,
+    async def generate(db: AsyncSession, run: AIRun) -> RunResult:
+        question = run.input_payload_json.get("question", "")
+        allowed_chunks = await retrieve_case_evidence(
+            db=db, workspace_id=workspace_id, case_id=case_id,
+            query_text=question, selected_source_ids=run.input_source_ids or None, top_k=8,
         )
-        run = (await db.execute(stmt)).scalar_one_or_none()
-        if run is None or run.status == "cancelled":
-            return
+        await publish_run_event(run.id, "status", {
+            "status": "running", "stage": "generating", "retrieved_count": len(allowed_chunks),
+        })
+        result = await MedGemmaAdapter().generate_grounded_answer(
+            question=question, allowed_chunks=allowed_chunks, images_b64=[],
+        )
+        return RunResult({
+            "answer_markdown": result.answer_markdown,
+            "citations": [c.model_dump(mode="json") for c in result.citations],
+            "limitations_note": result.limitations_note,
+        }, result.telemetry)
 
-        run.status = "running"
-        await db.commit()
-        await publish_run_event(run.id, "status", {"status": "running", "stage": "retrieving"})
-
-        try:
-            question = run.input_payload_json.get("question", "")
-            allowed_chunks = await retrieve_case_evidence(
-                db=db,
-                workspace_id=workspace_id,
-                case_id=case_id,
-                query_text=question,
-                selected_source_ids=run.input_source_ids or None,
-                top_k=8,
-            )
-
-            await publish_run_event(
-                run.id,
-                "status",
-                {"status": "running", "stage": "generating", "retrieved_count": len(allowed_chunks)},
-            )
-
-            result = await adapter.generate_grounded_answer(
-                question=question,
-                allowed_chunks=allowed_chunks,
-                images_b64=[],
-            )
-
-            # Re-check cancellation before committing output
-            try:
-                await db.refresh(run)
-                if run.status == "cancelled":
-                    return
-            except ObjectDeletedError:
-                return
-
-            output_payload = {
-                "answer_markdown": result.answer_markdown,
-                "citations": [c.model_dump(mode="json") for c in result.citations],
-                "limitations_note": result.limitations_note,
-            }
-            run.status = "completed"
-            run.output_json = output_payload
-            run.metrics_json = result.telemetry
-            run.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-
-            await publish_run_event(
-                run.id,
-                "completed",
-                {
-                    "status": "completed",
-                    "output_json": output_payload,
-                    "metrics_json": result.telemetry,
-                },
-            )
-        except Exception as exc:
-            try:
-                run.status = "failed"
-                run.error_detail = str(exc)
-                run.completed_at = datetime.now(timezone.utc)
-                await db.commit()
-                await publish_run_event(
-                    run.id,
-                    "failed",
-                    {"status": "failed", "error_detail": str(exc)},
-                )
-            except Exception as inner_exc:
-                logger.warning("Could not persist failed state for QA run %s: %s", run_id, inner_exc)
-            raise
+    await _execute_run_async(
+        workspace_id, case_id, run_id, stage="retrieving", operation=generate,
+    )
 
 
 async def _execute_ehr_summary_async(
     workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
 ) -> None:
-    summarizer = TwoPassEHRSummarizer()
-    async with AsyncSessionLocal() as db:
-        stmt = select(AIRun).where(
-            AIRun.id == run_id,
-            AIRun.case_id == case_id,
-            AIRun.workspace_id == workspace_id,
+    async def summarize(db: AsyncSession, run: AIRun) -> RunResult:
+        result = await TwoPassEHRSummarizer().execute_two_pass_summary(
+            db=db, workspace_id=workspace_id, case_id=case_id,
+            selected_source_ids=run.input_source_ids or None,
         )
-        run = (await db.execute(stmt)).scalar_one_or_none()
-        if run is None or run.status == "cancelled":
-            return
+        return RunResult(result.model_dump(mode="json"), result.telemetry)
 
-        run.status = "running"
-        await db.commit()
-        await publish_run_event(
-            run.id,
-            "status",
-            {"status": "running", "stage": "pass1_extracting_chronological_facts"},
-        )
-
-        try:
-            summary_payload = await summarizer.execute_two_pass_summary(
-                db=db,
-                workspace_id=workspace_id,
-                case_id=case_id,
-                selected_source_ids=run.input_source_ids or None,
-            )
-
-            try:
-                await db.refresh(run)
-                if run.status == "cancelled":
-                    return
-            except ObjectDeletedError:
-                return
-
-            output_dict = summary_payload.model_dump(mode="json")
-            run.status = "completed"
-            run.output_json = output_dict
-            run.metrics_json = summary_payload.telemetry
-            run.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-
-            await publish_run_event(
-                run.id,
-                "completed",
-                {
-                    "status": "completed",
-                    "output_json": output_dict,
-                    "metrics_json": summary_payload.telemetry,
-                },
-            )
-        except Exception as exc:
-            try:
-                run.status = "failed"
-                run.error_detail = str(exc)
-                run.completed_at = datetime.now(timezone.utc)
-                await db.commit()
-                await publish_run_event(
-                    run.id, "failed", {"status": "failed", "error_detail": str(exc)}
-                )
-            except Exception as inner_exc:
-                logger.warning("Could not persist failed state for EHR run %s: %s", run_id, inner_exc)
-            raise
+    await _execute_run_async(
+        workspace_id, case_id, run_id,
+        stage="pass1_extracting_chronological_facts", operation=summarize,
+    )
 
 
 @celery_app.task(name="app.workers.tasks.ingest_source_file_task")
 def ingest_source_file_task(workspace_id: str, case_id: str, source_file_id: str) -> None:
-    asyncio.run(
+    _run_worker_task(
         _ingest_source_file_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(source_file_id)
         )
@@ -390,7 +301,7 @@ def ingest_source_file_task(workspace_id: str, case_id: str, source_file_id: str
 
 @celery_app.task(name="app.workers.tasks.execute_grounded_qa_task")
 def execute_grounded_qa_task(workspace_id: str, case_id: str, run_id: str) -> None:
-    asyncio.run(
+    _run_worker_task(
         _execute_grounded_qa_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
         )
@@ -399,7 +310,7 @@ def execute_grounded_qa_task(workspace_id: str, case_id: str, run_id: str) -> No
 
 @celery_app.task(name="app.workers.tasks.execute_ehr_summary_task")
 def execute_ehr_summary_task(workspace_id: str, case_id: str, run_id: str) -> None:
-    asyncio.run(
+    _run_worker_task(
         _execute_ehr_summary_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
         )
@@ -409,151 +320,46 @@ def execute_ehr_summary_task(workspace_id: str, case_id: str, run_id: str) -> No
 async def _execute_xray_analysis_async(
     workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
 ) -> None:
-    service = ChestXrayAnalysisService()
-    async with AsyncSessionLocal() as db:
-        stmt = select(AIRun).where(
-            AIRun.id == run_id,
-            AIRun.case_id == case_id,
-            AIRun.workspace_id == workspace_id,
+    async def analyze(db: AsyncSession, run: AIRun) -> RunResult:
+        result = await ChestXrayAnalysisService().execute_single_xray_analysis(
+            db=db, workspace_id=workspace_id, case_id=case_id,
+            source_file_id=uuid.UUID(run.input_payload_json["source_file_id"]),
+            user_id=run.created_by, ai_run_id=run.id,
+            clinical_indication=run.input_payload_json.get(
+                "clinical_indication", "Routine chest radiograph evaluation.",
+            ),
         )
-        run = (await db.execute(stmt)).scalar_one_or_none()
-        if run is None or run.status == "cancelled":
-            return
+        return RunResult(result.model_dump(mode="json"), result.telemetry)
 
-        run.status = "running"
-        await db.commit()
-        await publish_run_event(
-            run.id, "status", {"status": "running", "stage": "analyzing_chest_xray"}
-        )
-
-        try:
-            source_id = uuid.UUID(run.input_payload_json["source_file_id"])
-            indication = run.input_payload_json.get(
-                "clinical_indication", "Routine chest radiograph evaluation."
-            )
-            result = await service.execute_single_xray_analysis(
-                db=db,
-                workspace_id=workspace_id,
-                case_id=case_id,
-                source_file_id=source_id,
-                user_id=run.created_by,
-                clinical_indication=indication,
-                ai_run_id=run.id,
-            )
-
-            try:
-                await db.refresh(run)
-                if run.status == "cancelled":
-                    return
-            except ObjectDeletedError:
-                return
-
-            output_dict = result.model_dump(mode="json")
-            run.status = "completed"
-            run.output_json = output_dict
-            run.metrics_json = result.telemetry
-            run.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-
-            await publish_run_event(
-                run.id,
-                "completed",
-                {
-                    "status": "completed",
-                    "output_json": output_dict,
-                    "metrics_json": result.telemetry,
-                },
-            )
-        except Exception as exc:
-            try:
-                run.status = "failed"
-                run.error_detail = str(exc)
-                run.completed_at = datetime.now(timezone.utc)
-                await db.commit()
-                await publish_run_event(
-                    run.id, "failed", {"status": "failed", "error_detail": str(exc)}
-                )
-            except Exception as inner_exc:
-                logger.warning("Could not persist failed state for X-ray run %s: %s", run_id, inner_exc)
-            raise
+    await _execute_run_async(
+        workspace_id, case_id, run_id, stage="analyzing_chest_xray", operation=analyze,
+    )
 
 
 async def _execute_longitudinal_xray_async(
     workspace_id: uuid.UUID, case_id: uuid.UUID, run_id: uuid.UUID
 ) -> None:
-    service = ChestXrayAnalysisService()
-    async with AsyncSessionLocal() as db:
-        stmt = select(AIRun).where(
-            AIRun.id == run_id,
-            AIRun.case_id == case_id,
-            AIRun.workspace_id == workspace_id,
-        )
-        run = (await db.execute(stmt)).scalar_one_or_none()
-        if run is None or run.status == "cancelled":
-            return
-
-        run.status = "running"
-        await db.commit()
-        await publish_run_event(
-            run.id, "status", {"status": "running", "stage": "comparing_longitudinal_xrays"}
-        )
-
-        try:
-            prior_id = uuid.UUID(run.input_payload_json["prior_source_file_id"])
-            curr_id = uuid.UUID(run.input_payload_json["current_source_file_id"])
-            question = run.input_payload_json.get(
+    async def compare(db: AsyncSession, run: AIRun) -> RunResult:
+        result = await ChestXrayAnalysisService().execute_longitudinal_comparison(
+            db=db, workspace_id=workspace_id, case_id=case_id,
+            prior_source_file_id=uuid.UUID(run.input_payload_json["prior_source_file_id"]),
+            current_source_file_id=uuid.UUID(run.input_payload_json["current_source_file_id"]),
+            clinical_question=run.input_payload_json.get(
                 "clinical_question",
                 "Evaluate interval change between prior and current chest radiographs.",
-            )
-            result = await service.execute_longitudinal_comparison(
-                db=db,
-                workspace_id=workspace_id,
-                case_id=case_id,
-                prior_source_file_id=prior_id,
-                current_source_file_id=curr_id,
-                clinical_question=question,
-            )
+            ),
+        )
+        return RunResult(result.model_dump(mode="json"), result.telemetry)
 
-            try:
-                await db.refresh(run)
-                if run.status == "cancelled":
-                    return
-            except ObjectDeletedError:
-                return
-
-            output_dict = result.model_dump(mode="json")
-            run.status = "completed"
-            run.output_json = output_dict
-            run.metrics_json = result.telemetry
-            run.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-
-            await publish_run_event(
-                run.id,
-                "completed",
-                {
-                    "status": "completed",
-                    "output_json": output_dict,
-                    "metrics_json": result.telemetry,
-                },
-            )
-        except Exception as exc:
-            try:
-                run.status = "failed"
-                run.error_detail = str(exc)
-                run.completed_at = datetime.now(timezone.utc)
-                await db.commit()
-                await publish_run_event(
-                    run.id, "failed", {"status": "failed", "error_detail": str(exc)}
-                )
-            except Exception as inner_exc:
-                logger.warning("Could not persist failed state for longitudinal X-ray run %s: %s", run_id, inner_exc)
-            raise
+    await _execute_run_async(
+        workspace_id, case_id, run_id,
+        stage="comparing_longitudinal_xrays", operation=compare,
+    )
 
 
 @celery_app.task(name="app.workers.tasks.execute_xray_analysis_task")
 def execute_xray_analysis_task(workspace_id: str, case_id: str, run_id: str) -> None:
-    asyncio.run(
+    _run_worker_task(
         _execute_xray_analysis_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
         )
@@ -562,7 +368,7 @@ def execute_xray_analysis_task(workspace_id: str, case_id: str, run_id: str) -> 
 
 @celery_app.task(name="app.workers.tasks.execute_longitudinal_xray_task")
 def execute_longitudinal_xray_task(workspace_id: str, case_id: str, run_id: str) -> None:
-    asyncio.run(
+    _run_worker_task(
         _execute_longitudinal_xray_async(
             uuid.UUID(workspace_id), uuid.UUID(case_id), uuid.UUID(run_id)
         )
@@ -624,7 +430,8 @@ async def _export_report_pdf_async(
             f"workspaces/{workspace_id}/cases/{case_id}/exports/"
             f"report_v{report_ver.version_number}_{report_ver.id}.pdf"
         )
-        storage_adapter.internal_s3.put_object(
+        await asyncio.to_thread(
+            storage_adapter.internal_s3.put_object,
             Bucket=storage_adapter.bucket,
             Key=export_key,
             Body=pdf_bytes,
@@ -640,11 +447,10 @@ async def _export_report_pdf_async(
 def export_report_pdf_task(
     workspace_id: str, case_id: str, report_version_id: str
 ) -> None:
-    asyncio.run(
+    _run_worker_task(
         _export_report_pdf_async(
             uuid.UUID(workspace_id),
             uuid.UUID(case_id),
             uuid.UUID(report_version_id),
         )
     )
-

@@ -27,3 +27,8 @@ AsyncSessionLocal = async_sessionmaker(
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
+
+
+async def dispose_engine() -> None:
+    """Disposes active database connection pool, e.g. at end of worker task event loop."""
+    await engine.dispose()

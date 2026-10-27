@@ -12,8 +12,23 @@ from dataclasses import asdict, dataclass
 import httpx
 from PIL import Image, ImageDraw
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from server import normalize_medical_image_896
+def normalize_medical_image_896(raw_bytes: bytes) -> Image.Image:
+    """
+    Normalizes a raw medical image (PNG, JPEG, etc.) into an 896x896 RGB letterboxed
+    PIL Image with deterministic black padding, matching the MedGemma 1.5 input specification.
+    """
+    with Image.open(io.BytesIO(raw_bytes)) as source:
+        img = source.convert("RGB")
+    orig_w, orig_h = img.size
+    scale = min(896.0 / float(orig_w), 896.0 / float(orig_h))
+    resized_w = int(round(orig_w * scale))
+    resized_h = int(round(orig_h * scale))
+    pad_left = (896 - resized_w) // 2
+    pad_top = (896 - resized_h) // 2
+    resized = img.resize((resized_w, resized_h), resample=Image.Resampling.BICUBIC)
+    canvas = Image.new("RGB", (896, 896), color=(0, 0, 0))
+    canvas.paste(resized, (pad_left, pad_top))
+    return canvas
 
 
 @dataclass

@@ -63,19 +63,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r apps/api/requirements.txt
-          pip install -e .
+          pip install pytest pytest-asyncio aiosqlite
 
       - name: Verify Python Syntax & Compilation
         run: |
-          python -m compileall src apps/api tests
+          python -m compileall src apps/api apps/gpu-service tests
 
       - name: Run Authoritative Test Suite
         env:
-          PYTHONPATH: apps/api
-          DEBUG_ALLOW_UNVERIFIED_JWT: "true"
-          MEDGEMMA_MODE: "mock_deterministic"
+          PYTHONPATH: apps/api:src
+          HF_HUB_OFFLINE: "1"
         run: |
-          python -m unittest discover -s tests -v
+          python -m pytest tests apps/api/tests -q -p no:cacheprovider
 
   container-verification:
     name: Container & Docker Build Verification
@@ -89,6 +88,7 @@ jobs:
 
       - name: Validate Docker Compose Configuration
         run: |
+          cp .env.test .env
           docker compose --env-file .env.test config --quiet
 
       - name: Build Web Container
