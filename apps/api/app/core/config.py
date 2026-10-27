@@ -1,4 +1,8 @@
+import json
+import logging
 import os
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Optional
 
 
@@ -40,86 +44,90 @@ def _load_env_fallback() -> None:
                             val = val.strip().strip("'\"")
                             if key and key not in os.environ:
                                 os.environ[key] = val
-            except Exception:
-                pass
+            except OSError as exc:
+                logging.getLogger(__name__).warning("Could not read environment file %s: %s", candidate, exc)
             break
 
 
-try:
-    from pydantic_settings import BaseSettings, SettingsConfigDict
+class Settings(BaseModel):
+    """One typed schema, whether started through uv, Docker, or a worker."""
 
-    class Settings(BaseSettings):
-        model_config = SettingsConfigDict(
-            env_file=(".env", "../.env", "../../.env"),
-            env_file_encoding="utf-8",
-            extra="ignore",
-        )
+    model_config = ConfigDict(extra="ignore")
 
-        POSTGRES_USER: str = "medgemma"
-        POSTGRES_PASSWORD: str = "medgemma_dev_secret"
-        POSTGRES_DB: str = "medgemma_workspace"
-        DATABASE_URL: str = "postgresql+asyncpg://medgemma:medgemma_dev_secret@postgres:5432/medgemma_workspace"
+    ENVIRONMENT: str = "development"
+    POSTGRES_USER: str = "medgemma"
+    POSTGRES_PASSWORD: str = "medgemma_dev_secret"
+    POSTGRES_DB: str = "medgemma_workspace"
+    DATABASE_URL: str = "postgresql+asyncpg://medgemma:medgemma_dev_secret@postgres:5432/medgemma_workspace"
 
-        REDIS_URL: str = "redis://redis:6379/0"
+    REDIS_URL: str = "redis://redis:6379/0"
 
-        S3_ENDPOINT_URL: str = "http://minio:9000"
-        S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000"
-        S3_ACCESS_KEY: str = "minioadmin"
-        S3_SECRET_KEY: str = "minioadmin_secret"
-        S3_BUCKET_NAME: str = "clinical-cases"
+    S3_ENDPOINT_URL: str = "http://minio:9000"
+    S3_PUBLIC_ENDPOINT_URL: str = "http://localhost:9000"
+    S3_ACCESS_KEY: str = "minioadmin"
+    S3_SECRET_KEY: str = "minioadmin_secret"
+    S3_BUCKET_NAME: str = "clinical-cases"
 
-        JWKS_URL: str = "http://web:3000/api/auth/jwks"
-        JWT_ISSUER: str = "http://localhost:3000"
-        JWT_AUDIENCE: str = "medgemma-api"
-        DEBUG_ALLOW_UNVERIFIED_JWT: bool = False
-        CORS_ORIGINS: list[str] = [
-            "http://localhost:3000",
-            "http://localhost:80",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:80",
-            "http://web:3000",
-        ]
+    JWKS_URL: str = "http://web:3000/api/auth/jwks"
+    JWT_ISSUER: str = "http://localhost:3000"
+    JWT_AUDIENCE: str = "medgemma-api"
+    DEBUG_ALLOW_UNVERIFIED_JWT: bool = False
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:80",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:80",
+        "http://web:3000",
+    ]
 
-        MEDGEMMA_MODE: str = "local_4bit"
-        MEDGEMMA_CHECKPOINT: str = "google/medgemma-1.5-4b-it"
-        MEDGEMMA_PROCESSOR_VERSION: str = "1.5.0-896px"
-        MEDGEMMA_SERVICE_URL: str = "http://gpu-service:8080"
-        MEDGEMMA_MAX_CONCURRENCY: int = 1
-        HF_TOKEN: Optional[str] = None
+    MEDGEMMA_MODE: str = "local_4bit"
+    MEDGEMMA_CHECKPOINT: str = "google/medgemma-1.5-4b-it"
+    MEDGEMMA_PROCESSOR_VERSION: str = "1.5.0-896px"
+    MEDGEMMA_SERVICE_URL: str = "http://gpu-service:8080"
+    MEDGEMMA_MAX_CONCURRENCY: int = Field(default=1, ge=1)
+    HF_TOKEN: Optional[str] = None
 
-    settings = Settings()
+    def __init__(self, **overrides):
+        _load_env_fallback()
+        values = {name: os.environ[name] for name in type(self).model_fields if name in os.environ}
+        values.update(overrides)
+        super().__init__(**values)
 
-except ImportError:
-    _load_env_fallback()
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_origins(cls, value):
+        if isinstance(value, str):
+            if value.lstrip().startswith("["):
+                return json.loads(value)
+            return _parse_cors_origins(value)
+        return value
 
-    class FallbackSettings:
-        POSTGRES_USER: str = os.getenv("POSTGRES_USER", "medgemma")
-        POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "medgemma_dev_secret")
-        POSTGRES_DB: str = os.getenv("POSTGRES_DB", "medgemma_workspace")
-        DATABASE_URL: str = os.getenv(
-            "DATABASE_URL",
-            "postgresql+asyncpg://medgemma:medgemma_dev_secret@postgres:5432/medgemma_workspace",
-        )
+    @field_validator("MEDGEMMA_MAX_CONCURRENCY", mode="before")
+    @classmethod
+    def parse_concurrency(cls, value):
+        return _safe_int(value, default=1)
 
-        REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    @field_validator("DEBUG_ALLOW_UNVERIFIED_JWT")
+    @classmethod
+    def validate_debug_allow_unverified_jwt(cls, value: bool, info) -> bool:
+        env = (info.data.get("ENVIRONMENT") if info.data else None) or os.environ.get("ENVIRONMENT", "development")
+        if value and str(env).strip().lower() in ("production", "prod", "staging"):
+            raise ValueError(
+                "DEBUG_ALLOW_UNVERIFIED_JWT cannot be enabled in production or staging environments"
+            )
+        return value
 
-        S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
-        S3_PUBLIC_ENDPOINT_URL: str = os.getenv("S3_PUBLIC_ENDPOINT_URL", "http://localhost:9000")
-        S3_ACCESS_KEY: str = os.getenv("S3_ACCESS_KEY", "minioadmin")
-        S3_SECRET_KEY: str = os.getenv("S3_SECRET_KEY", "minioadmin_secret")
-        S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "clinical-cases")
+    @model_validator(mode="after")
+    def validate_debug_jwt_model(self) -> "Settings":
+        if self.DEBUG_ALLOW_UNVERIFIED_JWT and str(self.ENVIRONMENT).strip().lower() in (
+            "production",
+            "prod",
+            "staging",
+        ):
+            raise ValueError(
+                "DEBUG_ALLOW_UNVERIFIED_JWT cannot be enabled in production or staging environments"
+            )
+        return self
 
-        JWKS_URL: str = os.getenv("JWKS_URL", "http://web:3000/api/auth/jwks")
-        JWT_ISSUER: str = os.getenv("JWT_ISSUER", "http://localhost:3000")
-        JWT_AUDIENCE: str = os.getenv("JWT_AUDIENCE", "medgemma-api")
-        DEBUG_ALLOW_UNVERIFIED_JWT: bool = os.getenv("DEBUG_ALLOW_UNVERIFIED_JWT", "false").lower() in ("1", "true", "yes")
-        CORS_ORIGINS: list[str] = _parse_cors_origins(os.getenv("CORS_ORIGINS"))
 
-        MEDGEMMA_MODE: str = os.getenv("MEDGEMMA_MODE", "local_4bit")
-        MEDGEMMA_CHECKPOINT: str = os.getenv("MEDGEMMA_CHECKPOINT", "google/medgemma-1.5-4b-it")
-        MEDGEMMA_PROCESSOR_VERSION: str = os.getenv("MEDGEMMA_PROCESSOR_VERSION", "1.5.0-896px")
-        MEDGEMMA_SERVICE_URL: str = os.getenv("MEDGEMMA_SERVICE_URL", "http://gpu-service:8080")
-        MEDGEMMA_MAX_CONCURRENCY: int = _safe_int(os.getenv("MEDGEMMA_MAX_CONCURRENCY"), default=1)
-        HF_TOKEN: Optional[str] = os.getenv("HF_TOKEN")
-
-    settings = FallbackSettings()  # type: ignore
+settings = Settings()

@@ -52,7 +52,7 @@ async def verify_better_auth_jwt(token: str) -> dict[str, Any]:
             payload = jwt.decode(
                 token,
                 signing_key.key,
-                algorithms=["RS256", "ES256", "HS256"],
+                algorithms=["RS256", "ES256"],
                 audience=settings.JWT_AUDIENCE,
                 issuer=settings.JWT_ISSUER,
             )

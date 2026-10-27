@@ -133,6 +133,17 @@ class PrivateStorageAdapter:
             invalid_reason = "Invalid JPEG magic bytes."
         elif declared_kind == "dicom" and (len(header) < 132 or header[128:132] != b"DICM"):
             invalid_reason = "Invalid DICOM preamble (missing DICM at offset 128)."
+        elif declared_kind == "ehr_note":
+            if total_bytes > 5 * 1024 * 1024:
+                invalid_reason = "EHR note exceeds maximum allowed size of 5 MB."
+            else:
+                try:
+                    header.decode("utf-8")
+                except UnicodeDecodeError:
+                    try:
+                        header[:-3].decode("utf-8")
+                    except UnicodeDecodeError:
+                        invalid_reason = "Invalid EHR note encoding: must be valid UTF-8 text."
 
         if invalid_reason:
             self.delete_object(storage_key)
