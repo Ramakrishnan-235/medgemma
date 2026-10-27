@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { type ComponentType } from "react";
+import { useWorkspaceNavigation } from "@/hooks/useWorkspaceNavigation";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { ReviewBar } from "@/components/medgemma/ReviewBar";
 import { Sidebar } from "@/components/medgemma/Sidebar";
@@ -27,72 +28,28 @@ import { QaScreen } from "@/components/medgemma/screens/QaScreen";
 import { LibraryScreen } from "@/components/medgemma/screens/LibraryScreen";
 import { SettingsScreen } from "@/components/medgemma/screens/SettingsScreen";
 
+const SCREENS: Record<PageId, ComponentType> = {
+  landing: LandingScreen,
+  signin: SignInScreen,
+  overview: OverviewScreen,
+  cases: CasesScreen,
+  case: CaseDetailScreen,
+  chat: ChatScreen,
+  imaging: ImagingScreen,
+  compare: CompareScreen,
+  report: ReportScreen,
+  reasoning: ReasoningScreen,
+  ehr: EhrScreen,
+  extraction: ExtractionScreen,
+  qa: QaScreen,
+  library: LibraryScreen,
+  settings: SettingsScreen,
+};
+
 export default function MedGemmaWorkspaceApp() {
-  const { page, setPage, closeModal } = useWorkspaceStore();
-
-  // Synchronize hash in URL for deep linking (#overview, #imaging, etc.)
-  useEffect(() => {
-    const handleHash = () => {
-      const hash = window.location.hash.slice(1) as PageId;
-      if (hash && hash !== page) {
-        setPage(hash);
-      }
-    };
-
-    window.addEventListener("hashchange", handleHash);
-    if (window.location.hash) {
-      handleHash();
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeModal();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("hashchange", handleHash);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [page, setPage, closeModal]);
-
-  const renderScreen = () => {
-    switch (page) {
-      case "landing":
-        return <LandingScreen />;
-      case "signin":
-        return <SignInScreen />;
-      case "overview":
-        return <OverviewScreen />;
-      case "cases":
-        return <CasesScreen />;
-      case "case":
-        return <CaseDetailScreen />;
-      case "chat":
-        return <ChatScreen />;
-      case "imaging":
-        return <ImagingScreen />;
-      case "compare":
-        return <CompareScreen />;
-      case "report":
-        return <ReportScreen />;
-      case "reasoning":
-        return <ReasoningScreen />;
-      case "ehr":
-        return <EhrScreen />;
-      case "extraction":
-        return <ExtractionScreen />;
-      case "qa":
-        return <QaScreen />;
-      case "library":
-        return <LibraryScreen />;
-      case "settings":
-        return <SettingsScreen />;
-      default:
-        return <OverviewScreen />;
-    }
-  };
+  const page = useWorkspaceStore((state) => state.page);
+  useWorkspaceNavigation();
+  const Screen = SCREENS[page];
 
   const isStandalone = ["landing", "signin"].includes(page);
 
@@ -103,14 +60,14 @@ export default function MedGemmaWorkspaceApp() {
 
       {/* Render standalone pages or the unified clinical shell */}
       {isStandalone ? (
-        renderScreen()
+        <Screen />
       ) : (
         <div className="app">
           <Sidebar />
           <main className="main">
             <Topbar />
             <div className="content">
-              {renderScreen()}
+              <Screen />
               <Footnote />
             </div>
           </main>

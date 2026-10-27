@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { INITIAL_LIBRARY_FILES } from "@/types/workspace";
@@ -7,14 +9,16 @@ import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function LibraryScreen() {
-  const {
-    libraryType,
-    setLibraryType,
-    librarySearch,
-    setLibrarySearch,
-    setPage,
-    openModal,
-  } = useWorkspaceStore();
+  const { libraryType, setLibraryType, librarySearch, setLibrarySearch, setPage, openModal } = useWorkspaceStore(
+    useShallow((state) => ({
+      libraryType: state.libraryType,
+      setLibraryType: state.setLibraryType,
+      librarySearch: state.librarySearch,
+      setLibrarySearch: state.setLibrarySearch,
+      setPage: state.setPage,
+      openModal: state.openModal,
+    })),
+  );
 
   const tabs = [
     "All files",

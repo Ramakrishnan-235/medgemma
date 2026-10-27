@@ -5,9 +5,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthenticatedPrincipal, get_authorized_case, get_current_principal
-from app.core.config import settings
 from app.core.storage import storage_adapter
-from app.db.models import AIRun, Case, EvidenceChunk, JobOutbox, SourceFile
+from app.db.models import Case, EvidenceChunk, SourceFile
+from app.services.run_queue import queue_ai_run
 from app.db.session import get_db
 from app.services.ehr_summarizer import TwoPassEHRSummarizer
 
@@ -51,40 +51,19 @@ async def create_ehr_summary_run(
                 detail="One or more selected source files do not belong to this case.",
             )
 
-    run_id = uuid.uuid4()
-    ai_run = AIRun(
-        id=run_id,
-        workspace_id=case.workspace_id,
-        case_id=case.id,
-        task_type="ehr_summary",
-        status="queued",
-        model_checkpoint=settings.MEDGEMMA_CHECKPOINT,
-        processor_version=settings.MEDGEMMA_PROCESSOR_VERSION,
-        prompt_template_version=TwoPassEHRSummarizer.PROMPT_TEMPLATE_VERSION,
-        input_source_ids=req.selected_source_ids,
-        input_payload_json={"workflow": "two_pass_chronological_ehr"},
-        created_by=principal.user_id,
+    ai_run = await queue_ai_run(
+        db, case=case, user_id=principal.user_id,
+        task_type="ehr_summary", task_name="execute_ehr_summary_task",
+        prompt_version=TwoPassEHRSummarizer.PROMPT_TEMPLATE_VERSION,
+        source_ids=req.selected_source_ids,
+        input_payload={"workflow": "two_pass_chronological_ehr"},
     )
-    outbox = JobOutbox(
-        aggregate_type="ai_run",
-        aggregate_id=run_id,
-        celery_task_name="app.workers.tasks.execute_ehr_summary_task",
-        queue_name="interactive",
-        payload_json={
-            "workspace_id": str(case.workspace_id),
-            "case_id": str(case.id),
-            "run_id": str(run_id),
-        },
-    )
-    db.add(ai_run)
-    db.add(outbox)
-    await db.commit()
 
     return {
-        "run_id": str(run_id),
+        "run_id": str(ai_run.id),
         "status": "queued",
         "task_type": "ehr_summary",
-        "events_url": f"/api/v1/cases/{case.id}/runs/{run_id}/events",
+        "events_url": f"/api/v1/cases/{case.id}/runs/{ai_run.id}/events",
     }
 
 

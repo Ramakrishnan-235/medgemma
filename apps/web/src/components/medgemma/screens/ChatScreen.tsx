@@ -1,19 +1,23 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function ChatScreen() {
-  const {
-    chatMessages,
-    addChatMessage,
-    clearChat,
-    setPage,
-    openModal,
-    showToast,
-  } = useWorkspaceStore();
+  const { chatMessages, addChatMessage, clearChat, setPage, openModal, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      chatMessages: state.chatMessages,
+      addChatMessage: state.addChatMessage,
+      clearChat: state.clearChat,
+      setPage: state.setPage,
+      openModal: state.openModal,
+      showToast: state.showToast,
+    })),
+  );
 
   const [inputVal, setInputVal] = useState("");
 

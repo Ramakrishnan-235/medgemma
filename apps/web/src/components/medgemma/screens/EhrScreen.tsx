@@ -1,12 +1,21 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function EhrScreen() {
-  const { ehrTab, setEhrTab, setPage, showToast } = useWorkspaceStore();
+  const { ehrTab, setEhrTab, setPage, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      ehrTab: state.ehrTab,
+      setEhrTab: state.setEhrTab,
+      setPage: state.setPage,
+      showToast: state.showToast,
+    })),
+  );
 
   const handleRefresh = () => {
     showToast("Summary layout refreshed. No record processing was performed.");

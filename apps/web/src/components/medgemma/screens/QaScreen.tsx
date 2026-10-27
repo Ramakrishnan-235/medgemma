@@ -1,12 +1,21 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function QaScreen() {
-  const { qaAnswer, setQaAnswer, setPage, showToast } = useWorkspaceStore();
+  const { qaAnswer, setQaAnswer, setPage, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      qaAnswer: state.qaAnswer,
+      setQaAnswer: state.setQaAnswer,
+      setPage: state.setPage,
+      showToast: state.showToast,
+    })),
+  );
   const [qaInput, setQaInput] = useState(
     "What information is missing from this demo record?"
   );

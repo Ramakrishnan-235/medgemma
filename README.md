@@ -25,3 +25,27 @@ uv run medgemma-app --cpu-offload --prompt "Explain what a red blood cell does."
 ```
 
 The default limit is 128 new tokens; the launcher accepts 1–512. `--check` runs a CUDA matrix computation without loading the model.
+
+## Workspace services and validation
+
+The repository also contains a FastAPI API in `apps/api`, Celery ingestion and analysis workers, a Next.js design preview in `apps/web`, and a GPU HTTP service scaffold in `apps/gpu-service`.
+
+The HTTP scaffold implements **only** `MEDGEMMA_MODE=mock_deterministic`. It returns fixture output for integration testing. In other modes its health and generation endpoints return HTTP 503. Real local CUDA inference is available through the CLI above; it has not been connected to the HTTP scaffold. Most frontend screens remain a design preview with session-local data.
+
+Run the complete backend suite from the root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests apps/api/tests -q -p no:cacheprovider
+```
+
+The suite uses deterministic embeddings, HTTP mocks, and SQLite test adapters for PostgreSQL types. It does not download models or validate real model quality, PostgreSQL vector queries, or a deployed service stack. Install the `dev` dependency group with `uv sync --group dev` if needed.
+
+Run frontend checks from `apps/web`:
+
+```powershell
+npm ci
+npm run type-check
+npm run build
+```
+
+Configuration now uses one typed `Settings` schema. Process environment values override the nearest `.env` found in the working directory or its first two parents. `CORS_ORIGINS` accepts a comma-separated string or a JSON array. See [REFACTOR_REPORT.md](REFACTOR_REPORT.md) for the baseline, changes, and verification limits.

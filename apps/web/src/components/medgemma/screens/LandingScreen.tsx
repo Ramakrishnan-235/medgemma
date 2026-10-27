@@ -6,7 +6,7 @@ import { Icon } from "../Icons";
 import { Badge } from "../CommonUI";
 
 export function LandingScreen() {
-  const { setPage } = useWorkspaceStore();
+  const setPage = useWorkspaceStore((state) => state.setPage);
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });

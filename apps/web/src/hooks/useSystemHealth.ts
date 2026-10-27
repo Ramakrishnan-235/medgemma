@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 
 export interface SystemHealthResponse {
   status: string;
-  app: string;
-  version: string;
+  service: string;
+  mode: string;
+  checkpoint: string;
 }
 
 export function useSystemHealth() {
@@ -12,20 +13,11 @@ export function useSystemHealth() {
   return useQuery<SystemHealthResponse>({
     queryKey: ["system-health"],
     queryFn: async () => {
-      try {
-        const res = await fetch(`${apiUrl}/health`);
-        if (!res.ok) {
-          throw new Error(`Health check failed with status: ${res.status}`);
-        }
-        return await res.json();
-      } catch {
-        // Fallback demo state if backend isn't currently up
-        return {
-          status: "connected (local fallback)",
-          app: "medgemma-api",
-          version: "1.5.0",
-        };
+      const res = await fetch(`${apiUrl}/health`);
+      if (!res.ok) {
+        throw new Error(`Health check failed with status: ${res.status}`);
       }
+      return await res.json();
     },
     refetchInterval: 30000,
   });

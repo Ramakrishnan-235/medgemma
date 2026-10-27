@@ -1,12 +1,20 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function OverviewScreen() {
-  const { setPage, cases, openModal } = useWorkspaceStore();
+  const { setPage, cases, openModal } = useWorkspaceStore(
+    useShallow((state) => ({
+      setPage: state.setPage,
+      cases: state.cases,
+      openModal: state.openModal,
+    })),
+  );
 
   const recentCases = cases.slice(0, 4);
 

@@ -5,9 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthenticatedPrincipal, get_authorized_case, get_current_principal
-from app.core.config import settings
 from app.core.storage import storage_adapter
-from app.db.models import AIRun, Case, ImageAnnotation, JobOutbox, SourceFile
+from app.db.models import Case, ImageAnnotation, SourceFile
+from app.services.run_queue import queue_ai_run
 from app.db.session import get_db
 from app.services.xray_analyzer import ChestXrayAnalysisService
 
@@ -192,38 +192,14 @@ async def trigger_single_xray_run(
     if (await db.execute(stmt)).scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Imaging study not found in this case.")
 
-    run_id = uuid.uuid4()
-    ai_run = AIRun(
-        id=run_id,
-        workspace_id=case.workspace_id,
-        case_id=case.id,
-        task_type="xray_analysis",
-        status="queued",
-        model_checkpoint=settings.MEDGEMMA_CHECKPOINT,
-        processor_version=settings.MEDGEMMA_PROCESSOR_VERSION,
-        prompt_template_version=ChestXrayAnalysisService.SINGLE_PROMPT_VERSION,
-        input_source_ids=[req.source_file_id],
-        input_payload_json={
-            "source_file_id": str(req.source_file_id),
-            "clinical_indication": req.clinical_indication,
-        },
-        created_by=principal.user_id,
+    ai_run = await queue_ai_run(
+        db, case=case, user_id=principal.user_id,
+        task_type="xray_analysis", task_name="execute_xray_analysis_task",
+        prompt_version=ChestXrayAnalysisService.SINGLE_PROMPT_VERSION,
+        source_ids=[req.source_file_id],
+        input_payload={"source_file_id": str(req.source_file_id), "clinical_indication": req.clinical_indication},
     )
-    outbox = JobOutbox(
-        aggregate_type="ai_run",
-        aggregate_id=run_id,
-        celery_task_name="app.workers.tasks.execute_xray_analysis_task",
-        queue_name="interactive",
-        payload_json={
-            "workspace_id": str(case.workspace_id),
-            "case_id": str(case.id),
-            "run_id": str(run_id),
-        },
-    )
-    db.add(ai_run)
-    db.add(outbox)
-    await db.commit()
-    return {"run_id": str(run_id), "status": "queued", "task_type": "xray_analysis"}
+    return {"run_id": str(ai_run.id), "status": "queued", "task_type": "xray_analysis"}
 
 
 @router.post("/runs/compare-longitudinal", status_code=status.HTTP_201_CREATED)
@@ -251,36 +227,11 @@ async def trigger_longitudinal_xray_run(
             detail="Both Prior and Current studies must belong to this case.",
         )
 
-    run_id = uuid.uuid4()
-    ai_run = AIRun(
-        id=run_id,
-        workspace_id=case.workspace_id,
-        case_id=case.id,
-        task_type="xray_longitudinal",
-        status="queued",
-        model_checkpoint=settings.MEDGEMMA_CHECKPOINT,
-        processor_version=settings.MEDGEMMA_PROCESSOR_VERSION,
-        prompt_template_version=ChestXrayAnalysisService.LONGITUDINAL_PROMPT_VERSION,
-        input_source_ids=[req.prior_source_file_id, req.current_source_file_id],
-        input_payload_json={
-            "prior_source_file_id": str(req.prior_source_file_id),
-            "current_source_file_id": str(req.current_source_file_id),
-            "clinical_question": req.clinical_question,
-        },
-        created_by=principal.user_id,
+    ai_run = await queue_ai_run(
+        db, case=case, user_id=principal.user_id,
+        task_type="xray_longitudinal", task_name="execute_longitudinal_xray_task",
+        prompt_version=ChestXrayAnalysisService.LONGITUDINAL_PROMPT_VERSION,
+        source_ids=[req.prior_source_file_id, req.current_source_file_id],
+        input_payload={"prior_source_file_id": str(req.prior_source_file_id), "current_source_file_id": str(req.current_source_file_id), "clinical_question": req.clinical_question},
     )
-    outbox = JobOutbox(
-        aggregate_type="ai_run",
-        aggregate_id=run_id,
-        celery_task_name="app.workers.tasks.execute_longitudinal_xray_task",
-        queue_name="interactive",
-        payload_json={
-            "workspace_id": str(case.workspace_id),
-            "case_id": str(case.id),
-            "run_id": str(run_id),
-        },
-    )
-    db.add(ai_run)
-    db.add(outbox)
-    await db.commit()
-    return {"run_id": str(run_id), "status": "queued", "task_type": "xray_longitudinal"}
+    return {"run_id": str(ai_run.id), "status": "queued", "task_type": "xray_longitudinal"}

@@ -1,12 +1,20 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Icon } from "./Icons";
 import { type PageId } from "@/types/workspace";
 
 export function Sidebar() {
-  const { page, setPage, cases } = useWorkspaceStore();
+  const { page, setPage, cases } = useWorkspaceStore(
+    useShallow((state) => ({
+      page: state.page,
+      setPage: state.setPage,
+      cases: state.cases,
+    })),
+  );
 
   const isAssistant = ["chat", "qa"].includes(page);
   const isImaging = ["imaging", "compare"].includes(page);

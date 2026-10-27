@@ -1,12 +1,21 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { PAGES } from "@/types/workspace";
 import { Icon } from "./Icons";
 
 export function Topbar() {
-  const { page, setPage, activeCase, setActiveCase } = useWorkspaceStore();
+  const { page, setPage, activeCase, setActiveCase } = useWorkspaceStore(
+    useShallow((state) => ({
+      page: state.page,
+      setPage: state.setPage,
+      activeCase: state.activeCase,
+      setActiveCase: state.setActiveCase,
+    })),
+  );
 
   const currentPageLabel =
     PAGES.find(([id]) => id === page)?.[1] || "Workspace";

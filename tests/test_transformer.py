@@ -43,6 +43,11 @@ class TestTransformerCLI(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.parser.parse_args(["--max-new-tokens", "not_a_number"])
 
+    def test_out_of_range_tokens_fail_during_argument_parsing(self) -> None:
+        for value in ("0", "-1", "513"):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                self.parser.parse_args(["--max-new-tokens", value])
+
 
 if __name__ == "__main__":
     unittest.main()

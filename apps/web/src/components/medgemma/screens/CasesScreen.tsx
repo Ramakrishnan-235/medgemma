@@ -1,20 +1,24 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function CasesScreen() {
-  const {
-    cases,
-    caseFilter,
-    setCaseFilter,
-    caseSearch,
-    setCaseSearch,
-    setPage,
-    openModal,
-  } = useWorkspaceStore();
+  const { cases, caseFilter, setCaseFilter, caseSearch, setCaseSearch, setPage, openModal } = useWorkspaceStore(
+    useShallow((state) => ({
+      cases: state.cases,
+      caseFilter: state.caseFilter,
+      setCaseFilter: state.setCaseFilter,
+      caseSearch: state.caseSearch,
+      setCaseSearch: state.setCaseSearch,
+      setPage: state.setPage,
+      openModal: state.openModal,
+    })),
+  );
 
   const filterTabs = ["All cases", "Needs review", "Draft ready", "Reviewed"];
 

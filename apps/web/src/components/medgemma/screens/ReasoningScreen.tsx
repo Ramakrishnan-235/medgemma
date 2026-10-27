@@ -1,12 +1,20 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function ReasoningScreen() {
-  const { setPage, openModal, showToast } = useWorkspaceStore();
+  const { setPage, openModal, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      setPage: state.setPage,
+      openModal: state.openModal,
+      showToast: state.showToast,
+    })),
+  );
   const [question, setQuestion] = useState(
     "What context should be reviewed before summarizing this case?"
   );

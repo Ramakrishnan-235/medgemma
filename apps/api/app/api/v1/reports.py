@@ -100,7 +100,7 @@ async def create_immutable_report_version(
                 chunk_ids.add(uuid.UUID(str(raw_id)))
             except (ValueError, TypeError):
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail=f"Invalid evidenceChunkId UUID format: '{raw_id}'",
                 )
 
@@ -115,7 +115,7 @@ async def create_immutable_report_version(
         valid_chunks = {c.id: c for c in (await db.execute(stmt)).scalars().all()}
         if len(valid_chunks) != len(chunk_ids):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Report contains citation chips referencing unauthorized or missing evidence chunks.",
             )
         for chip in raw_chips:

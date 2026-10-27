@@ -39,7 +39,7 @@ export function ClinicalReportEditor({
   onExportPdf,
   onOpenPdfCitation,
 }: ClinicalReportEditorProps) {
-  const { focusCitationOnViewer } = useImagingStore();
+  const focusCitationOnViewer = useImagingStore((state) => state.focusCitationOnViewer);
   const [isSaving, setIsSaving] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 

@@ -1,19 +1,23 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function ExtractionScreen() {
-  const {
-    extractionField,
-    setExtractionField,
-    extractedFields,
-    updateExtractedField,
-    openModal,
-    showToast,
-  } = useWorkspaceStore();
+  const { extractionField, setExtractionField, extractedFields, updateExtractedField, openModal, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      extractionField: state.extractionField,
+      setExtractionField: state.setExtractionField,
+      extractedFields: state.extractedFields,
+      updateExtractedField: state.updateExtractedField,
+      openModal: state.openModal,
+      showToast: state.showToast,
+    })),
+  );
 
   const [verifiedChecked, setVerifiedChecked] = useState(false);
 

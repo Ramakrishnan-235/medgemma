@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import dynamic from "next/dynamic";
 import { useImagingStore, type StudyAnnotation, type ViewerToolMode } from "@/stores/useImagingStore";
@@ -41,14 +43,16 @@ export function LongitudinalXrayWorkspace({
   featureModelBoxesEnabled,
   onTriggerLongitudinalRun,
 }: LongitudinalXrayWorkspaceProps) {
-  const {
-    activeTool,
-    setActiveTool,
-    syncPriorCurrent,
-    setSyncPriorCurrent,
-    showModelBoxes,
-    setShowModelBoxes,
-  } = useImagingStore();
+  const { activeTool, setActiveTool, syncPriorCurrent, setSyncPriorCurrent, showModelBoxes, setShowModelBoxes } = useImagingStore(
+    useShallow((state) => ({
+      activeTool: state.activeTool,
+      setActiveTool: state.setActiveTool,
+      syncPriorCurrent: state.syncPriorCurrent,
+      setSyncPriorCurrent: state.setSyncPriorCurrent,
+      showModelBoxes: state.showModelBoxes,
+      setShowModelBoxes: state.setShowModelBoxes,
+    })),
+  );
 
   const tools: { id: ViewerToolMode; label: string }[] = [
     { id: "WindowLevel", label: "W/L Contrast" },

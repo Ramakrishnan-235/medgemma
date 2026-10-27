@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
@@ -8,7 +10,12 @@ import { Icon } from "../Icons";
 import { ClinicalReportEditor, type ReportVersionRecord } from "@/components/editor/ClinicalReportEditor";
 
 export function ReportScreen() {
-  const { showToast, setPage } = useWorkspaceStore();
+  const { showToast, setPage } = useWorkspaceStore(
+    useShallow((state) => ({
+      showToast: state.showToast,
+      setPage: state.setPage,
+    })),
+  );
 
   const [editorMode, setEditorMode] = useState<"tiptap" | "sections">("tiptap");
 

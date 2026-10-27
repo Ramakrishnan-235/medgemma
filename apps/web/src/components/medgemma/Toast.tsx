@@ -4,7 +4,7 @@ import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 
 export function Toast() {
-  const { toastMessage } = useWorkspaceStore();
+  const toastMessage = useWorkspaceStore((state) => state.toastMessage);
 
   if (!toastMessage) return null;
 

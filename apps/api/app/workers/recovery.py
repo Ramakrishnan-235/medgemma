@@ -1,4 +1,5 @@
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
@@ -11,6 +12,9 @@ from app.core.config import settings
 from app.db.models import AIRun, Case, JobOutbox, SourceFile
 from app.db.session import AsyncSessionLocal, get_db
 from app.workers.tasks import celery_app, publish_run_event
+from app.workers.run_lifecycle import TERMINAL_RUN_STATES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/cases/{case_id}", tags=["cancellation-and-recovery"])
 
@@ -30,7 +34,7 @@ async def cancel_active_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found in this case.")
 
-    if run.status in ("completed", "failed", "cancelled"):
+    if run.status in TERMINAL_RUN_STATES:
         return {"run_id": str(run.id), "status": run.status}
 
     # 1. Update authoritative state in PostgreSQL
@@ -47,12 +51,20 @@ async def cancel_active_run(
     await db.commit()
 
     # 3. Set cooperative Redis cancellation key & revoke Celery task
-    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    await r.setex(f"cancel_run:{run.id}", 3600, "1")
-    await r.aclose()
+    try:
+        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        try:
+            await r.setex(f"cancel_run:{run.id}", 3600, "1")
+        finally:
+            await r.aclose()
+    except aioredis.RedisError:
+        logger.info("Cancellation persisted; Redis unavailable for run %s", run.id)
 
     if outbox_row:
-        celery_app.control.revoke(str(outbox_row.id), terminate=False)
+        try:
+            celery_app.control.revoke(str(outbox_row.id), terminate=False)
+        except Exception:
+            logger.warning("Cancellation persisted; task revoke failed for %s", run.id, exc_info=True)
 
     await publish_run_event(
         run.id,
@@ -70,6 +82,7 @@ async def recover_stalled_runs_and_files(stale_minutes: int = 10) -> dict[str, i
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)
     recovered_runs = 0
     requeued_files = 0
+    run_notifications: list[tuple[uuid.UUID, str]] = []
 
     async with AsyncSessionLocal() as db:
         # 1. Mark stalled AI runs as failed so clients can retry cleanly
@@ -84,11 +97,7 @@ async def recover_stalled_runs_and_files(stale_minutes: int = 10) -> dict[str, i
             )
             run.completed_at = datetime.now(timezone.utc)
             recovered_runs += 1
-            await publish_run_event(
-                run.id,
-                "failed",
-                {"status": "failed", "error_detail": run.error_detail},
-            )
+            run_notifications.append((run.id, run.error_detail))
 
         # 2. Re-queue idempotent file ingestion jobs stuck in 'processing'
         stalled_files_stmt = select(SourceFile).where(
@@ -113,5 +122,8 @@ async def recover_stalled_runs_and_files(stale_minutes: int = 10) -> dict[str, i
             requeued_files += 1
 
         await db.commit()
+
+    for run_id, error_detail in run_notifications:
+        await publish_run_event(run_id, "failed", {"status": "failed", "error_detail": error_detail})
 
     return {"recovered_runs": recovered_runs, "requeued_files": requeued_files}

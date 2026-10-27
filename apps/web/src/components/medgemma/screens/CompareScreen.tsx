@@ -7,7 +7,7 @@ import { Icon } from "../Icons";
 import { Viewer } from "../Viewer";
 
 export function CompareScreen() {
-  const { setPage } = useWorkspaceStore();
+  const setPage = useWorkspaceStore((state) => state.setPage);
 
   return (
     <>

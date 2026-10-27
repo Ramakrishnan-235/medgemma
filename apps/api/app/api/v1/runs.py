@@ -14,14 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthenticatedPrincipal, get_authorized_case, get_current_principal
 from app.core.config import settings
-from app.db.models import AIRun, Case, JobOutbox, ReportVersion, SourceFile
+from app.db.models import AIRun, Case, ReportVersion, SourceFile
+from app.services.run_queue import queue_ai_run
+from app.workers.run_lifecycle import TERMINAL_RUN_STATES
 from app.db.session import AsyncSessionLocal, get_db
 from app.services.medgemma_adapter import MedGemmaAdapter
 
 logger = logging.getLogger("runs")
 router = APIRouter(prefix="/cases/{case_id}", tags=["runs-and-reports"])
-
-TERMINAL_RUN_STATES = {"completed", "failed", "cancelled"}
 
 
 class CreateGroundedQARunRequest(BaseModel):
@@ -66,34 +66,13 @@ async def create_grounded_qa_run(
                 detail="One or more selected source files do not belong to this case.",
             )
 
-    run_id = uuid.uuid4()
-    ai_run = AIRun(
-        id=run_id,
-        workspace_id=case.workspace_id,
-        case_id=case.id,
-        task_type="chat_qa",
-        status="queued",
-        model_checkpoint=settings.MEDGEMMA_CHECKPOINT,
-        processor_version=settings.MEDGEMMA_PROCESSOR_VERSION,
-        prompt_template_version=MedGemmaAdapter.PROMPT_TEMPLATE_VERSION,
-        input_source_ids=req.selected_source_ids,
-        input_payload_json={"question": req.question},
-        created_by=principal.user_id,
+    ai_run = await queue_ai_run(
+        db, case=case, user_id=principal.user_id,
+        task_type="chat_qa", task_name="execute_grounded_qa_task",
+        prompt_version=MedGemmaAdapter.PROMPT_TEMPLATE_VERSION,
+        source_ids=req.selected_source_ids,
+        input_payload={"question": req.question},
     )
-    outbox = JobOutbox(
-        aggregate_type="ai_run",
-        aggregate_id=run_id,
-        celery_task_name="app.workers.tasks.execute_grounded_qa_task",
-        queue_name="interactive",
-        payload_json={
-            "workspace_id": str(case.workspace_id),
-            "case_id": str(case.id),
-            "run_id": str(run_id),
-        },
-    )
-    db.add(ai_run)
-    db.add(outbox)
-    await db.commit()
 
     return RunSummaryResponse(
         run_id=ai_run.id,
@@ -120,69 +99,75 @@ async def stream_run_events(
         redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         pubsub = redis_client.pubsub()
         channel = f"run_events:{run_id}"
-        await pubsub.subscribe(channel)
+        redis_available = False
 
-        try:
+        async def load_snapshot() -> dict | None:
             async with AsyncSessionLocal() as db:
                 stmt = select(AIRun).where(
-                    AIRun.id == run_id,
-                    AIRun.case_id == case.id,
+                    AIRun.id == run_id, AIRun.case_id == case.id,
                     AIRun.workspace_id == case.workspace_id,
                 )
                 run = (await db.execute(stmt)).scalar_one_or_none()
                 if run is None:
-                    yield f"event: error\ndata: {json.dumps({'detail': 'Run not found'})}\n\n"
-                    return
-
-                snapshot = {
-                    "event": "snapshot",
-                    "run_id": str(run.id),
-                    "status": run.status,
-                    "output_json": run.output_json,
-                    "metrics_json": run.metrics_json,
+                    return None
+                return {
+                    "run_id": str(run.id), "status": run.status,
+                    "output_json": run.output_json, "metrics_json": run.metrics_json,
                     "error_detail": run.error_detail,
                 }
-                yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
 
-                if run.status in TERMINAL_RUN_STATES:
-                    return
+        def encode_event(event: str, payload: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps({'event': event, **payload})}\n\n"
 
-            # Stream live updates with periodic DB reconciliation fallback
+        try:
+            try:
+                await pubsub.subscribe(channel)
+                redis_available = True
+            except aioredis.RedisError:
+                logger.info("Redis unavailable for run %s; polling database", run_id)
+
+            snapshot = await load_snapshot()
+            if snapshot is None:
+                yield encode_event("error", {"detail": "Run not found"})
+                return
+            yield encode_event("snapshot", snapshot)
+            if snapshot["status"] in TERMINAL_RUN_STATES:
+                return
+
             while not await request.is_disconnected():
-                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
+                msg = None
+                if redis_available:
+                    try:
+                        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
+                    except aioredis.RedisError:
+                        redis_available = False
+                if not redis_available:
+                    await asyncio.sleep(5.0)
                 if msg and msg.get("data"):
                     try:
                         payload = json.loads(msg["data"])
-                        ev_name = payload.get("event", "status")
-                        yield f"event: {ev_name}\ndata: {json.dumps(payload)}\n\n"
-                        if payload.get("status") in TERMINAL_RUN_STATES:
-                            return
                     except (json.JSONDecodeError, TypeError):
-                        pass
+                        payload = None
+                    # Progress is transient. Terminal state always comes from the database.
+                    if isinstance(payload, dict) and payload.get("event") == "status":
+                        yield encode_event("status", payload)
                 else:
-                    # Heartbeat + authoritative PostgreSQL fallback check
                     yield ": heartbeat\n\n"
-                    async with AsyncSessionLocal() as db:
-                        stmt = select(AIRun).where(AIRun.id == run_id)
-                        current_run = (await db.execute(stmt)).scalar_one_or_none()
-                        if current_run and current_run.status in TERMINAL_RUN_STATES:
-                            fallback_payload = {
-                                "event": current_run.status,
-                                "run_id": str(current_run.id),
-                                "status": current_run.status,
-                                "output_json": current_run.output_json,
-                                "metrics_json": current_run.metrics_json,
-                                "error_detail": current_run.error_detail,
-                            }
-                            yield f"event: {current_run.status}\ndata: {json.dumps(fallback_payload)}\n\n"
-                            return
+
+                current = await load_snapshot()
+                if current is None:
+                    yield encode_event("error", {"detail": "Run not found"})
+                    return
+                if current["status"] in TERMINAL_RUN_STATES:
+                    yield encode_event(current["status"], current)
+                    return
         finally:
-            try:
-                await pubsub.unsubscribe(channel)
-                await pubsub.aclose()
-                await redis_client.aclose()
-            except Exception:
-                pass
+            # Close both resources even if subscribing or one cleanup operation failed.
+            for close in (pubsub.aclose, redis_client.aclose):
+                try:
+                    await close()
+                except aioredis.RedisError:
+                    logger.debug("Redis stream cleanup failed", exc_info=True)
 
     return StreamingResponse(
         event_generator(),

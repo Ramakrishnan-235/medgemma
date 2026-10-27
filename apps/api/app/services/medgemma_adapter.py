@@ -1,10 +1,12 @@
-import json
 from typing import Any, Optional
 import uuid
 import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.services.generation import (
+    generated_text, generation_telemetry, parse_generated_object, request_generation,
+)
 
 
 class VerifiedCitation(BaseModel):
@@ -67,22 +69,10 @@ class MedGemmaAdapter:
             "max_new_tokens": 768,
         }
 
-        if self._client is not None:
-            resp = await self._client.post(f"{self.base_url}/v1/generate", json=request_payload)
-            resp.raise_for_status()
-            gpu_data = resp.json()
-        else:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(f"{self.base_url}/v1/generate", json=request_payload)
-                resp.raise_for_status()
-                gpu_data = resp.json()
-
-        raw_text = gpu_data.get("generated_text") or gpu_data.get("text") or ""
-        try:
-            parsed = json.loads(raw_text)
-            if not isinstance(parsed, dict):
-                raise ValueError("Expected dictionary from JSON response")
-        except (json.JSONDecodeError, ValueError):
+        gpu_data = await request_generation(self.base_url, request_payload, client=self._client)
+        raw_text = generated_text(gpu_data)
+        parsed = parse_generated_object(raw_text)
+        if parsed is None:
             parsed = {
                 "answer_markdown": raw_text,
                 "cited_keys": [k for k in allowed_chunks if f"[{k}]" in raw_text],
@@ -91,8 +81,12 @@ class MedGemmaAdapter:
 
         # Deterministic Citation Resolution: reject any citation key not in allowed_chunks
         verified_citations: list[VerifiedCitation] = []
-        for key in parsed.get("cited_keys", []):
-            if key in allowed_chunks:
+        cited_keys = parsed.get("cited_keys", [])
+        if not isinstance(cited_keys, list):
+            cited_keys = []
+        seen_keys: set[str] = set()
+        for key in cited_keys:
+            if isinstance(key, str) and key in allowed_chunks and key not in seen_keys:
                 chunk = allowed_chunks[key]
                 try:
                     verified_citations.append(
@@ -105,7 +99,8 @@ class MedGemmaAdapter:
                             verbatim_quote=str(chunk.get("content_text", ""))[:240],
                         )
                     )
-                except (ValueError, KeyError):
+                    seen_keys.add(key)
+                except (ValueError, KeyError, TypeError):
                     continue
 
         return GroundedGenerationOutput(
@@ -115,14 +110,5 @@ class MedGemmaAdapter:
                 "limitations_note",
                 "For research and reviewer workflow only. Requires clinical validation.",
             )),
-            telemetry={
-                "model_checkpoint": gpu_data.get("model_checkpoint", settings.MEDGEMMA_CHECKPOINT),
-                "processor_version": gpu_data.get("processor_version", settings.MEDGEMMA_PROCESSOR_VERSION),
-                "prompt_template_version": self.PROMPT_TEMPLATE_VERSION,
-                "execution_mode": gpu_data.get("execution_mode", settings.MEDGEMMA_MODE),
-                "queue_wait_ms": gpu_data.get("queue_wait_ms", 0),
-                "inference_ms": gpu_data.get("inference_ms", 0),
-                "input_token_count": gpu_data.get("input_token_count", 0),
-                "output_token_count": gpu_data.get("output_token_count", 0),
-            },
+            telemetry=generation_telemetry(gpu_data, self.PROMPT_TEMPLATE_VERSION),
         )

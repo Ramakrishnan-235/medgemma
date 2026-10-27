@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { ScanSVG } from "./ScanSVG";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
@@ -16,8 +18,14 @@ export function Viewer({
   mode = "axial",
   initialSlice,
 }: ViewerProps) {
-  const { imagingMode, sliceIndex, setSliceIndex, showToast } =
-    useWorkspaceStore();
+  const { imagingMode, sliceIndex, setSliceIndex, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      imagingMode: state.imagingMode,
+      sliceIndex: state.sliceIndex,
+      setSliceIndex: state.setSliceIndex,
+      showToast: state.showToast,
+    })),
+  );
 
   const currentSlice = initialSlice !== undefined ? initialSlice : sliceIndex;
 

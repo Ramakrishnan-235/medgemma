@@ -19,6 +19,7 @@ except ImportError:
             return custom_op("<#>")(self.expr, other)
 
     class VECTOR(UserDefinedType):  # type: ignore[no-redef]
+        cache_ok = True
         comparator_factory = VectorComparator
 
         def __init__(self, dim: int = 384):

@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
@@ -8,14 +10,16 @@ import { Viewer } from "../Viewer";
 import { ScanSVG } from "../ScanSVG";
 
 export function ImagingScreen() {
-  const {
-    imagingMode,
-    setImagingMode,
-    selectedSeries,
-    setSelectedSeries,
-    setPage,
-    showToast,
-  } = useWorkspaceStore();
+  const { imagingMode, setImagingMode, selectedSeries, setSelectedSeries, setPage, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      imagingMode: state.imagingMode,
+      setImagingMode: state.setImagingMode,
+      selectedSeries: state.selectedSeries,
+      setSelectedSeries: state.setSelectedSeries,
+      setPage: state.setPage,
+      showToast: state.showToast,
+    })),
+  );
 
   const [reviewerNote, setReviewerNote] = useState("");
 

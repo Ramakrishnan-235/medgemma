@@ -1,21 +1,4 @@
-export type PageId =
-  | 'landing'
-  | 'signin'
-  | 'overview'
-  | 'cases'
-  | 'case'
-  | 'chat'
-  | 'imaging'
-  | 'compare'
-  | 'report'
-  | 'reasoning'
-  | 'ehr'
-  | 'extraction'
-  | 'qa'
-  | 'library'
-  | 'settings';
-
-export const PAGES: [PageId, string][] = [
+export const PAGES = [
   ['landing', 'Landing'],
   ['signin', 'Sign in'],
   ['overview', 'Overview'],
@@ -31,7 +14,13 @@ export const PAGES: [PageId, string][] = [
   ['qa', 'Medical Q&A'],
   ['library', 'Library'],
   ['settings', 'Settings'],
-];
+] as const;
+
+export type PageId = (typeof PAGES)[number][0];
+
+export function isPageId(value: string): value is PageId {
+  return PAGES.some(([id]) => id === value);
+}
 
 export interface CaseItem {
   id: string;

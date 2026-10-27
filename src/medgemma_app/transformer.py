@@ -8,6 +8,16 @@ from pathlib import Path
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models" / "medgemma-1.5-4b-it"
 
 
+def token_limit(value: str) -> int:
+    try:
+        tokens = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be an integer") from None
+    if not 1 <= tokens <= 512:
+        raise argparse.ArgumentTypeError("must be between 1 and 512")
+    return tokens
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="Check CUDA without loading the model")
@@ -19,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--prompt", default="Explain what a red blood cell does in one sentence.")
     parser.add_argument("--image", type=Path, help="Optional local image")
-    parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument("--max-new-tokens", type=token_limit, default=128)
     parser.add_argument("--cpu-offload", action="store_true", help="Use CPU RAM when GPU memory is limited")
     return parser
 
@@ -27,8 +37,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if not 1 <= args.max_new_tokens <= 512:
-        parser.error("--max-new-tokens must be between 1 and 512")
     if args.image is not None and not args.image.is_file():
         parser.error(f"Image not found: {args.image}")
 

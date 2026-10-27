@@ -11,7 +11,7 @@ export function SourceChip({
   label?: string;
   className?: string;
 }) {
-  const { openModal } = useWorkspaceStore();
+  const openModal = useWorkspaceStore((state) => state.openModal);
 
   return (
     <button
@@ -66,7 +66,7 @@ export function Heading({
 }
 
 export function ContextBar() {
-  const { setPage } = useWorkspaceStore();
+  const setPage = useWorkspaceStore((state) => state.setPage);
 
   return (
     <div className="context">

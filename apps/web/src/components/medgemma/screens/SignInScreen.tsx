@@ -1,11 +1,18 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Icon } from "../Icons";
 
 export function SignInScreen() {
-  const { setPage, showToast } = useWorkspaceStore();
+  const { setPage, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      setPage: state.setPage,
+      showToast: state.showToast,
+    })),
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 

@@ -1,5 +1,5 @@
+import asyncio
 import base64
-import json
 import os
 import uuid
 from typing import Any, Optional
@@ -17,6 +17,9 @@ from app.services.dicom_xray_pipeline import (
     map_medgemma_box_to_source_norm,
 )
 from app.services.medgemma_adapter import VerifiedCitation
+from app.services.generation import (
+    generated_text, generation_telemetry, parse_generated_object, request_generation,
+)
 
 FEATURE_MODEL_LOCALIZATION_BOXES = (
     os.getenv("FEATURE_MODEL_LOCALIZATION_BOXES", "false").lower() == "true"
@@ -106,7 +109,7 @@ class ChestXrayAnalysisService:
             view_pos = source.metadata_json.get("view_position", "UNKNOWN")
             study_date = source.metadata_json.get("encounter_date")
             content_text = f"Chest X-Ray ({view_pos}, {study_date or 'Undated'}): {source.filename}"
-            embedding = embed_passages_cpu([content_text])[0]
+            embedding = (await asyncio.to_thread(embed_passages_cpu, [content_text]))[0]
             chunk = EvidenceChunk(
                 workspace_id=source.workspace_id,
                 case_id=source.case_id,
@@ -141,7 +144,7 @@ class ChestXrayAnalysisService:
         if source is None:
             raise ValueError("Authorized Chest X-ray source file not found.")
 
-        img_b64 = self._load_medgemma_896_b64(source)
+        img_b64 = await asyncio.to_thread(self._load_medgemma_896_b64, source)
         img_chunk = await self._get_or_create_image_chunk(db, source)
         view_pos = source.metadata_json.get("view_position", "UNKNOWN")
         study_date = source.metadata_json.get("encounter_date")
@@ -168,20 +171,10 @@ class ChestXrayAnalysisService:
             "max_new_tokens": 896,
         }
 
-        if self._client is not None:
-            resp = await self._client.post(f"{self.base_url}/v1/generate", json=request_payload)
-            resp.raise_for_status()
-            gpu_data = resp.json()
-        else:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(f"{self.base_url}/v1/generate", json=request_payload)
-                resp.raise_for_status()
-                gpu_data = resp.json()
-
-        raw = (gpu_data.get("generated_text") or gpu_data.get("text") or "").strip().strip("`").removeprefix("json").strip()
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
+        gpu_data = await request_generation(self.base_url, request_payload, client=self._client)
+        raw = generated_text(gpu_data)
+        parsed = parse_generated_object(raw)
+        if parsed is None:
             parsed = {
                 "findings_by_region": [
                     {
@@ -263,15 +256,7 @@ class ChestXrayAnalysisService:
                 "Research reviewer draft only. Base MedGemma 1.5 outputs and localization boxes "
                 "require qualified clinician verification before clinical use."
             ),
-            telemetry={
-                "model_checkpoint": gpu_data.get("model_checkpoint", settings.MEDGEMMA_CHECKPOINT),
-                "processor_version": gpu_data.get("processor_version", settings.MEDGEMMA_PROCESSOR_VERSION),
-                "prompt_template_version": self.SINGLE_PROMPT_VERSION,
-                "queue_wait_ms": gpu_data.get("queue_wait_ms", 0.0),
-                "inference_ms": gpu_data.get("inference_ms", 0.0),
-                "input_token_count": gpu_data.get("input_token_count", 0),
-                "output_token_count": gpu_data.get("output_token_count", 0),
-            },
+            telemetry=generation_telemetry(gpu_data, self.SINGLE_PROMPT_VERSION),
         )
 
     async def execute_longitudinal_comparison(
@@ -295,8 +280,10 @@ class ChestXrayAnalysisService:
         prior_src = rows[prior_source_file_id]
         curr_src = rows[current_source_file_id]
 
-        prior_b64 = self._load_medgemma_896_b64(prior_src)
-        curr_b64 = self._load_medgemma_896_b64(curr_src)
+        prior_b64, curr_b64 = await asyncio.gather(
+            asyncio.to_thread(self._load_medgemma_896_b64, prior_src),
+            asyncio.to_thread(self._load_medgemma_896_b64, curr_src),
+        )
 
         prior_chunk = await self._get_or_create_image_chunk(db, prior_src)
         curr_chunk = await self._get_or_create_image_chunk(db, curr_src)
@@ -338,20 +325,12 @@ class ChestXrayAnalysisService:
             "max_new_tokens": 1024,
         }
 
-        if self._client is not None:
-            resp = await self._client.post(f"{self.base_url}/v1/generate", json=request_payload)
-            resp.raise_for_status()
-            gpu_data = resp.json()
-        else:
-            async with httpx.AsyncClient(timeout=150.0) as client:
-                resp = await client.post(f"{self.base_url}/v1/generate", json=request_payload)
-                resp.raise_for_status()
-                gpu_data = resp.json()
-
-        raw = (gpu_data.get("generated_text") or gpu_data.get("text") or "").strip().strip("`").removeprefix("json").strip()
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
+        gpu_data = await request_generation(
+            self.base_url, request_payload, client=self._client, timeout=150.0,
+        )
+        raw = generated_text(gpu_data)
+        parsed = parse_generated_object(raw)
+        if parsed is None:
             parsed = {
                 "interval_changes": [],
                 "comparison_summary_markdown": f"{raw} [cit_prior] [cit_current]",
@@ -405,13 +384,5 @@ class ChestXrayAnalysisService:
                 "Longitudinal descriptive draft for reviewer workflow only. "
                 "Does not perform deformable registration or automated quantitative mensuration."
             ),
-            telemetry={
-                "model_checkpoint": gpu_data.get("model_checkpoint", settings.MEDGEMMA_CHECKPOINT),
-                "processor_version": gpu_data.get("processor_version", settings.MEDGEMMA_PROCESSOR_VERSION),
-                "prompt_template_version": self.LONGITUDINAL_PROMPT_VERSION,
-                "queue_wait_ms": gpu_data.get("queue_wait_ms", 0.0),
-                "inference_ms": gpu_data.get("inference_ms", 0.0),
-                "input_token_count": gpu_data.get("input_token_count", 0),
-                "output_token_count": gpu_data.get("output_token_count", 0),
-            },
+            telemetry=generation_telemetry(gpu_data, self.LONGITUDINAL_PROMPT_VERSION),
         )

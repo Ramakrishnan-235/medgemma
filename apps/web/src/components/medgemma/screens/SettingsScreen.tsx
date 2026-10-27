@@ -1,12 +1,20 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function SettingsScreen() {
-  const { settingTab, setSettingTab, showToast } = useWorkspaceStore();
+  const { settingTab, setSettingTab, showToast } = useWorkspaceStore(
+    useShallow((state) => ({
+      settingTab: state.settingTab,
+      setSettingTab: state.setSettingTab,
+      showToast: state.showToast,
+    })),
+  );
 
   const tabs = [
     "Profile",

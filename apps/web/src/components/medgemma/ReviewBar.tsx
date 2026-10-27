@@ -1,11 +1,18 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { PAGES, type PageId } from "@/types/workspace";
 
 export function ReviewBar() {
-  const { page, setPage } = useWorkspaceStore();
+  const { page, setPage } = useWorkspaceStore(
+    useShallow((state) => ({
+      page: state.page,
+      setPage: state.setPage,
+    })),
+  );
 
   return (
     <div className="reviewbar">

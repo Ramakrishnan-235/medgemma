@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.db.models import EvidenceChunk, SourceFile
 from app.services.embeddings import embed_query_cpu
+from app.services.generation import (
+    generated_text, generation_telemetry, parse_generated_object, request_generation,
+)
 from app.services.medgemma_adapter import VerifiedCitation
 
 
@@ -61,8 +64,12 @@ SECTION_QUERIES: dict[str, tuple[str, str]] = {
 class TwoPassEHRSummarizer:
     PROMPT_TEMPLATE_VERSION = "v2.0-two-pass-ehr-summary"
 
-    def __init__(self, base_url: str = settings.MEDGEMMA_SERVICE_URL) -> None:
+    def __init__(
+        self, base_url: str = settings.MEDGEMMA_SERVICE_URL,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._client = client
 
     async def _retrieve_chronological_evidence(
         self,
@@ -155,39 +162,13 @@ class TwoPassEHRSummarizer:
     async def _call_medgemma_json(
         self, system_instruction: str, user_prompt: str, max_new_tokens: int = 1024
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=150.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/v1/generate",
-                json={
-                    "system_instruction": system_instruction,
-                    "user_prompt": user_prompt,
-                    "images": [],
-                    "max_new_tokens": max_new_tokens,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        raw = data["generated_text"].strip()
-        # Strip optional markdown code fences if the model wrapped JSON
-        if raw.startswith("```"):
-            raw = raw.strip("`").removeprefix("json").strip()
-
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            parsed = {}
-
-        telemetry = {
-            "model_checkpoint": data["model_checkpoint"],
-            "processor_version": data["processor_version"],
-            "execution_mode": data["execution_mode"],
-            "queue_wait_ms": data["queue_wait_ms"],
-            "inference_ms": data["inference_ms"],
-            "input_token_count": data["input_token_count"],
-            "output_token_count": data["output_token_count"],
-        }
-        return parsed, telemetry
+        data = await request_generation(
+            self.base_url,
+            {"system_instruction": system_instruction, "user_prompt": user_prompt,
+             "images": [], "max_new_tokens": max_new_tokens},
+            client=self._client, timeout=150.0,
+        )
+        return parse_generated_object(generated_text(data)) or {}, generation_telemetry(data)
 
     async def execute_two_pass_summary(
         self,
@@ -249,7 +230,6 @@ class TwoPassEHRSummarizer:
         verified_by_section: dict[str, list[ExtractedClinicalFact]] = {
             k: [] for k in SECTION_QUERIES
         }
-        used_citation_keys: set[str] = set()
 
         for raw_fact in pass1_json.get("facts", []):
             if not isinstance(raw_fact, dict):
@@ -268,7 +248,6 @@ class TwoPassEHRSummarizer:
                     citation_id=cit_id,
                 )
                 verified_by_section[cat].append(fact)
-                used_citation_keys.add(cit_id)
 
         # -------------------------------------------------------------------------
         # PASS 2: Section Synthesis + Deterministic Missing-Information State
@@ -315,7 +294,7 @@ class TwoPassEHRSummarizer:
 
             # Deterministic fallback markdown if Pass 2 omitted a key or dropped citations
             synthesized_md = pass2_summaries.get(sec_key, "").strip()
-            if not synthesized_md or not any(f"[{f.citation_id}]" in synthesized_md for f in sec_facts):
+            if not synthesized_md or not all(f"[{f.citation_id}]" in synthesized_md for f in sec_facts):
                 synthesized_md = "\n".join(
                     f"- **{f.encounter_date or 'Undated'}**: {f.statement}"
                     + (f" ({f.status_or_severity})" if f.status_or_severity else "")

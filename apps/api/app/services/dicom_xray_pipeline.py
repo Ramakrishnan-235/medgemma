@@ -8,7 +8,7 @@ import numpy as np
 import pydicom
 from dateutil import parser as date_parser
 from PIL import Image
-from pydicom.pixel_data_handlers.util import apply_modality_lut, apply_voi_lut
+from pydicom.pixels import apply_modality_lut, apply_voi_lut
 
 SUPPORTED_XRAY_MODALITIES = {"CR", "DX", "RG", "OT"}
 MEDGEMMA_TARGET_SIZE = 896

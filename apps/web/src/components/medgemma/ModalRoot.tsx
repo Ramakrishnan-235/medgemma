@@ -1,12 +1,26 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Icon } from "./Icons";
 
 export function ModalRoot() {
-  const { activeModal, closeModal, addCase, showToast, setPage } =
-    useWorkspaceStore();
+  const activeModal = useWorkspaceStore((state) => state.activeModal);
+  return activeModal ? <WorkspaceDialog key={activeModal.type} /> : null;
+}
+
+function WorkspaceDialog() {
+  const { activeModal, closeModal, addCase, showToast, setPage } = useWorkspaceStore(
+    useShallow((state) => ({
+      activeModal: state.activeModal,
+      closeModal: state.closeModal,
+      addCase: state.addCase,
+      showToast: state.showToast,
+      setPage: state.setPage,
+    })),
+  );
 
   const [caseTitle, setCaseTitle] = useState("");
   const [caseContext, setCaseContext] = useState("");

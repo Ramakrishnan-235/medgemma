@@ -1,5 +1,7 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
+
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   RenderingEngine,
@@ -65,15 +67,17 @@ export default function ChestXrayViewport({
   const elementRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<RenderingEngine | null>(null);
 
-  const {
-    activeTool,
-    showModelBoxes,
-    syncPriorCurrent,
-    sharedWindowRange,
-    setSharedWindowRange,
-    highlightedSourceId,
-    highlightedBboxNorm,
-  } = useImagingStore();
+  const { activeTool, showModelBoxes, syncPriorCurrent, sharedWindowRange, setSharedWindowRange, highlightedSourceId, highlightedBboxNorm } = useImagingStore(
+    useShallow((state) => ({
+      activeTool: state.activeTool,
+      showModelBoxes: state.showModelBoxes,
+      syncPriorCurrent: state.syncPriorCurrent,
+      sharedWindowRange: state.sharedWindowRange,
+      setSharedWindowRange: state.setSharedWindowRange,
+      highlightedSourceId: state.highlightedSourceId,
+      highlightedBboxNorm: state.highlightedBboxNorm,
+    })),
+  );
 
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragCurrent, setDragCurrent] = useState<{ x: number; y: number } | null>(null);
