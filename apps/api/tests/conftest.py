@@ -77,6 +77,8 @@ from app.db.session import get_db
 from app.main import app
 import app.api.v1.runs as runs_module
 import app.db.session as db_session_module
+import app.workers.outbox_relay as outbox_relay_module
+import app.workers.recovery as recovery_module
 
 
 WS_A_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -125,6 +127,8 @@ async def db_session(monkeypatch) -> AsyncGenerator[AsyncSession, None]:
     # Patch application sessionmaker so background lookups (e.g. SSE stream) hit the same in-memory DB
     monkeypatch.setattr(runs_module, "AsyncSessionLocal", session_factory)
     monkeypatch.setattr(db_session_module, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(outbox_relay_module, "AsyncSessionLocal", session_factory)
+    monkeypatch.setattr(recovery_module, "AsyncSessionLocal", session_factory)
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with session_factory() as sess:

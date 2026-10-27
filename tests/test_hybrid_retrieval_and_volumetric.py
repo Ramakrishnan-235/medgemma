@@ -29,8 +29,8 @@ from benchmark_parity_and_perf import (
     create_synthetic_test_xray_bytes,
     token_jaccard,
     verify_transformers_vs_vllm_parity,
+    normalize_medical_image_896,
 )
-from server import normalize_medical_image_896
 
 
 class TestHybridRetrieval(unittest.IsolatedAsyncioTestCase):
