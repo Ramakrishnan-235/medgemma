@@ -26,7 +26,7 @@ interface WorkspaceState {
   extractedFields: ExtractedFieldItem[];
   chatMessages: string[];
   qaAnswer: boolean;
-  activeModal: { type: "newcase" | "upload" | "source"; payload?: any } | null;
+  activeModal: { type: "newcase" | "upload" | "source"; payload?: unknown } | null;
   toastMessage: string | null;
 
   setPage: (p: PageId) => void;
@@ -46,14 +46,14 @@ interface WorkspaceState {
   addChatMessage: (msg: string) => void;
   clearChat: () => void;
   setQaAnswer: (val: boolean) => void;
-  openModal: (type: "newcase" | "upload" | "source", payload?: any) => void;
+  openModal: (type: "newcase" | "upload" | "source", payload?: unknown) => void;
   closeModal: () => void;
   showToast: (msg: string) => void;
 }
 
-let toastTimeout: NodeJS.Timeout | null = null;
+let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 
-export const useWorkspaceStore = create<WorkspaceState>((set) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   page: "overview",
   activeCase: "Case 024 · Chest review",
   imagingMode: "analysis",
@@ -85,14 +85,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
 
   setActiveCase: (c) => set({ activeCase: c }),
   setImagingMode: (m) => set({ imagingMode: m }),
-  setSliceIndex: (s) => set({ sliceIndex: s }),
+  setSliceIndex: (s) => set({ sliceIndex: Math.max(1, Math.min(240, Math.round(Number(s) || 1))) }),
   setSelectedSeries: (s) => set({ selectedSeries: s }),
   setCaseFilter: (f) => set({ caseFilter: f }),
   setCaseSearch: (q) => set({ caseSearch: q }),
 
-  addCase: ({ name, meta = "No sources yet", status = "In progress" }) =>
+  addCase: ({ name, meta = "No sources yet", status = "In progress" }) => {
     set((state) => {
-      const nextId = String(25 + state.cases.length).padStart(3, "0");
+      const numericIds = state.cases
+        .map((item) => {
+          const num = Number.parseInt(String(item.id).replace(/\D/g, ""), 10);
+          return Number.isFinite(num) ? num : 0;
+        })
+        .filter((n) => !Number.isNaN(n));
+      const maxId = numericIds.length > 0 ? Math.max(0, ...numericIds) : 0;
+      const nextId = String(maxId + 1).padStart(3, "0");
       const newCase: CaseItem = {
         id: nextId,
         name,
@@ -104,9 +111,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
         cases: [newCase, ...state.cases],
         caseFilter: "All cases",
         caseSearch: "",
-        page: "cases",
       };
-    }),
+    });
+    get().setPage("cases");
+  },
 
   setEhrTab: (t) => set({ ehrTab: t }),
   setLibraryType: (t) => set({ libraryType: t }),
