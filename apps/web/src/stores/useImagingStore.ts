@@ -11,6 +11,8 @@ export interface NormalizedBox {
 
 export interface StudyAnnotation {
   id: string;
+  source_file_id?: string;
+  frame_index?: number;
   origin: "manual" | "model_medgemma";
   anatomical_label: string;
   finding_text?: string | null;

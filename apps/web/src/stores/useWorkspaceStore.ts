@@ -12,6 +12,8 @@ import {
 interface WorkspaceState {
   page: PageId;
   activeCase: string;
+  activeCaseId: string;
+  activeSourceId: string | null;
   imagingMode: "analysis" | "volume" | "localization";
   sliceIndex: number;
   selectedSeries: string;
@@ -30,13 +32,16 @@ interface WorkspaceState {
   toastMessage: string | null;
 
   setPage: (p: PageId) => void;
-  setActiveCase: (c: string) => void;
+  setActiveCase: (c: string, id?: string) => void;
+  setActiveCaseId: (id: string) => void;
+  setActiveSourceId: (id: string | null) => void;
+  setCases: (cases: CaseItem[]) => void;
   setImagingMode: (m: "analysis" | "volume" | "localization") => void;
   setSliceIndex: (s: number) => void;
   setSelectedSeries: (s: string) => void;
   setCaseFilter: (f: string) => void;
   setCaseSearch: (q: string) => void;
-  addCase: (caseData: { name: string; meta?: string; status?: string }) => void;
+  addCase: (caseData: { id?: string; name: string; meta?: string; status?: string }) => void;
   setEhrTab: (t: "Overview" | "Timeline" | "Sources") => void;
   setLibraryType: (t: string) => void;
   setLibrarySearch: (q: string) => void;
@@ -56,6 +61,8 @@ let toastTimeout: ReturnType<typeof setTimeout> | null = null;
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   page: "overview",
   activeCase: "Case 024 · Chest review",
+  activeCaseId: "11111111-1111-1111-1111-111111111111",
+  activeSourceId: null,
   imagingMode: "analysis",
   sliceIndex: 124,
   selectedSeries: "01",
@@ -83,25 +90,36 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  setActiveCase: (c) => set({ activeCase: c }),
+  setActiveCase: (c, id) => {
+    set((state) => ({
+      activeCase: c,
+      activeCaseId: id || state.activeCaseId,
+    }));
+  },
+  setActiveCaseId: (id) => set({ activeCaseId: id }),
+  setActiveSourceId: (id) => set({ activeSourceId: id }),
+  setCases: (cases) => set({ cases }),
   setImagingMode: (m) => set({ imagingMode: m }),
   setSliceIndex: (s) => set({ sliceIndex: Math.max(1, Math.min(240, Math.round(Number(s) || 1))) }),
   setSelectedSeries: (s) => set({ selectedSeries: s }),
   setCaseFilter: (f) => set({ caseFilter: f }),
   setCaseSearch: (q) => set({ caseSearch: q }),
 
-  addCase: ({ name, meta = "No sources yet", status = "In progress" }) => {
+  addCase: ({ id, name, meta = "No sources yet", status = "In progress" }) => {
     set((state) => {
-      const numericIds = state.cases
-        .map((item) => {
-          const num = Number.parseInt(String(item.id).replace(/\D/g, ""), 10);
-          return Number.isFinite(num) ? num : 0;
-        })
-        .filter((n) => !Number.isNaN(n));
-      const maxId = numericIds.length > 0 ? Math.max(0, ...numericIds) : 0;
-      const nextId = String(maxId + 1).padStart(3, "0");
+      let caseId = id;
+      if (!caseId) {
+        const numericIds = state.cases
+          .map((item) => {
+            const num = Number.parseInt(String(item.id).replace(/\D/g, ""), 10);
+            return Number.isFinite(num) ? num : 0;
+          })
+          .filter((n) => !Number.isNaN(n));
+        const maxId = numericIds.length > 0 ? Math.max(0, ...numericIds) : 0;
+        caseId = String(maxId + 1).padStart(3, "0");
+      }
       const newCase: CaseItem = {
-        id: nextId,
+        id: caseId,
         name,
         meta,
         status,
@@ -109,6 +127,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
       return {
         cases: [newCase, ...state.cases],
+        activeCase: `${name}`,
+        activeCaseId: caseId.length === 36 ? caseId : state.activeCaseId,
         caseFilter: "All cases",
         caseSearch: "",
       };

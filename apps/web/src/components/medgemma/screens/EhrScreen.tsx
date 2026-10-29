@@ -2,23 +2,49 @@
 
 import { useShallow } from "zustand/react/shallow";
 
-import React from "react";
+import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
+import { api } from "@/lib/api";
 
 export function EhrScreen() {
-  const { ehrTab, setEhrTab, setPage, showToast } = useWorkspaceStore(
+  const { ehrTab, setEhrTab, setPage, showToast, activeCaseId } = useWorkspaceStore(
     useShallow((state) => ({
       ehrTab: state.ehrTab,
       setEhrTab: state.setEhrTab,
       setPage: state.setPage,
       showToast: state.showToast,
+      activeCaseId: state.activeCaseId,
     })),
   );
 
-  const handleRefresh = () => {
-    showToast("Summary layout refreshed. No record processing was performed.");
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  const [summaryData, setSummaryData] = useState<Record<string, unknown> | null>(null);
+
+  const handleRefresh = async () => {
+    setIsSummarizing(true);
+    try {
+      const run = await api.triggerEhrSummary(activeCaseId);
+      showToast("Queued two-pass grounded EHR clinical summarization in Celery.");
+      api.subscribeRunEvents(
+        activeCaseId,
+        run.run_id,
+        (event, data) => {
+          if (event === "snapshot" || event === "completed") {
+            if (data.output_json) {
+              setSummaryData(data.output_json as Record<string, unknown>);
+            }
+            setIsSummarizing(false);
+            showToast("Two-pass grounded EHR summary ready.");
+          }
+        },
+        () => setIsSummarizing(false)
+      );
+    } catch (err) {
+      setIsSummarizing(false);
+      showToast(`EHR trigger fallback: ${(err as Error).message}`);
+    }
   };
 
   return (

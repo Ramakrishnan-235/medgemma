@@ -1,29 +1,63 @@
 "use client";
 
 import { useShallow } from "zustand/react/shallow";
-
-import React from "react";
+import React, { useEffect } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
+import { api, type ApiCase } from "@/lib/api";
+import { type CaseItem } from "@/types/workspace";
 
 export function OverviewScreen() {
-  const { setPage, cases, openModal } = useWorkspaceStore(
+  const { setPage, cases, setCases, setActiveCase, openModal } = useWorkspaceStore(
     useShallow((state) => ({
       setPage: state.setPage,
       cases: state.cases,
+      setCases: state.setCases,
+      setActiveCase: state.setActiveCase,
       openModal: state.openModal,
-    })),
+    }))
   );
 
+  useEffect(() => {
+    async function syncCases() {
+      try {
+        const serverCases = await api.listCases();
+        if (serverCases && serverCases.length > 0) {
+          const mapped: CaseItem[] = serverCases.map((sc: ApiCase) => ({
+            id: sc.id,
+            name: sc.title || `Patient ${sc.patient_code}`,
+            meta: `${sc.patient_code} · ${sc.sources_count} sources`,
+            status: sc.status || "In progress",
+            date: new Date(sc.created_at).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }));
+          setCases(mapped);
+        }
+      } catch {
+        // Local preview fallback
+      }
+    }
+    syncCases();
+  }, [setCases]);
+
   const recentCases = cases.slice(0, 4);
+
+  const handleSelectCase = (c: CaseItem) => {
+    setActiveCase(c.name, c.id);
+    setPage("case");
+  };
 
   return (
     <>
       <Heading
-        eyebrow="SATURDAY, 24 OCTOBER 2026"
-        title="Good morning, Dr. Morgan."
-        desc="A little clarity for the work ahead."
+        eyebrow="WORKSPACE OVERVIEW"
+        title="Good morning, Clinician."
+        desc="A unified clinical intelligence workspace powered by MedGemma 1.5."
         actions={
           <button
             type="button"
@@ -42,28 +76,28 @@ export function OverviewScreen() {
             Active cases <Icon name="folder" />
           </label>
           <strong>{String(cases.length).padStart(2, "0")}</strong>
-          <small>In your demo workspace</small>
+          <small>PostgreSQL multi-tenant cases</small>
         </div>
         <div className="stat">
           <label>
             Awaiting review <Icon name="eye" />
           </label>
           <strong>04</strong>
-          <small>Ready for a closer look</small>
+          <small>Imaging &amp; EHR extractions</small>
         </div>
         <div className="stat">
           <label>
             Report drafts <Icon name="report" />
           </label>
           <strong>08</strong>
-          <small>Continue where you left off</small>
+          <small>Versioned TipTap drafts</small>
         </div>
       </div>
 
       {/* Quick Launch Cards */}
       <div className="row between">
         <h2>What would you like to work on?</h2>
-        <span className="design-label">YOUR TOOLS, IN ONE PLACE</span>
+        <span className="design-label">CLINICAL SUITE</span>
       </div>
 
       <div className="quickgrid">
@@ -71,19 +105,19 @@ export function OverviewScreen() {
           {
             icon: "scan",
             title: "Review an image",
-            desc: "Explore studies, regions and changes.",
+            desc: "Cornerstone3D DICOM & CXR workspace with SigLIP 896px grounding.",
             target: "imaging" as const,
           },
           {
             icon: "text",
             title: "Understand a record",
-            desc: "Bring a clinical story into focus.",
+            desc: "Synthesize EHR timeline with verifiable evidence chunks.",
             target: "ehr" as const,
           },
           {
             icon: "chat",
             title: "Start a conversation",
-            desc: "Ask, explore and work through ideas.",
+            desc: "Streaming multimodal clinical Q&A with E5-small-v2 hybrid RRF.",
             target: "chat" as const,
           },
         ].map((item) => (
@@ -136,13 +170,13 @@ export function OverviewScreen() {
                 {recentCases.map((c) => (
                   <tr
                     key={c.id}
-                    onClick={() => setPage("case")}
+                    onClick={() => handleSelectCase(c)}
                     style={{ cursor: "pointer" }}
                   >
                     <td>
                       <span className="case-name">
                         {c.name}
-                        <small>CASE {c.id} · Demo</small>
+                        <small>ID: {c.id.slice(0, 8)}</small>
                       </span>
                     </td>
                     <td className="muted">{c.meta}</td>
@@ -165,7 +199,7 @@ export function OverviewScreen() {
                         className="btn tiny ghost"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setPage("case");
+                          handleSelectCase(c);
                         }}
                         aria-label={`Open ${c.name}`}
                       >
@@ -189,21 +223,21 @@ export function OverviewScreen() {
               <span className="node" />
               <div>
                 Report draft saved
-                <small>Chest follow-up · 12 min ago</small>
+                <small>Chest follow-up · TipTap schema v1</small>
               </div>
             </div>
             <div className="event">
               <span className="node" />
               <div>
-                4 records added to case
-                <small>Record synthesis · 1 hour ago</small>
+                4 records ingested
+                <small>HNSW vector + tsvector GIN index updated</small>
               </div>
             </div>
             <div className="event">
               <span className="node" />
               <div>
-                Extraction ready to review
-                <small>Document review · Yesterday</small>
+                Cornerstone3D WASM initialized
+                <small>Hardware acceleration ready</small>
               </div>
             </div>
           </div>

@@ -2,10 +2,11 @@
 
 import { useShallow } from "zustand/react/shallow";
 
-import React from "react";
+import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
+import { api, type SystemHealth } from "@/lib/api";
 
 export function SettingsScreen() {
   const { settingTab, setSettingTab, showToast } = useWorkspaceStore(
@@ -15,6 +16,22 @@ export function SettingsScreen() {
       showToast: state.showToast,
     })),
   );
+
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [healthResult, setHealthResult] = useState<SystemHealth | null>(null);
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    try {
+      const health = await api.getHealth();
+      setHealthResult(health);
+      showToast(`Connected: ${health.service} (${health.status}) — Mode: ${health.mode}`);
+    } catch (err) {
+      showToast(`Connection failed: ${(err as Error).message}`);
+    } finally {
+      setTestingConnection(false);
+    }
+  };
 
   const tabs = [
     "Profile",
@@ -182,15 +199,22 @@ export function SettingsScreen() {
                 <button
                   type="button"
                   className="btn"
-                  onClick={() =>
-                    showToast(
-                      "No inference service is connected to this UI prototype."
-                    )
-                  }
+                  disabled={testingConnection}
+                  onClick={handleTestConnection}
                 >
-                  <Icon name="volume" /> Test connection
+                  <Icon name="volume" /> {testingConnection ? "Testing..." : "Test connection"}
                 </button>
               </div>
+
+              {healthResult && (
+                <div className="note" style={{ marginTop: "14px", backgroundColor: "#f0fdf4", borderColor: "#86efac" }}>
+                  <strong>Service Online</strong>
+                  <br />
+                  Endpoint: {healthResult.service} ({healthResult.status})
+                  <br />
+                  Mode: <code>{healthResult.mode}</code> · Checkpoint: <code>{healthResult.checkpoint}</code>
+                </div>
+              )}
             </div>
           )}
 

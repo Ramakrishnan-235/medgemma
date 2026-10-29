@@ -1,15 +1,25 @@
 "use client";
 
 import { useShallow } from "zustand/react/shallow";
-
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
-import { INITIAL_LIBRARY_FILES } from "@/types/workspace";
+import { INITIAL_LIBRARY_FILES, type LibraryItem } from "@/types/workspace";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
+import { api, type ApiSourceFile } from "@/lib/api";
 
 export function LibraryScreen() {
-  const { libraryType, setLibraryType, librarySearch, setLibrarySearch, setPage, openModal } = useWorkspaceStore(
+  const {
+    libraryType,
+    setLibraryType,
+    librarySearch,
+    setLibrarySearch,
+    setPage,
+    openModal,
+    activeCaseId,
+    activeCase,
+    setActiveSourceId,
+  } = useWorkspaceStore(
     useShallow((state) => ({
       libraryType: state.libraryType,
       setLibraryType: state.setLibraryType,
@@ -17,8 +27,40 @@ export function LibraryScreen() {
       setLibrarySearch: state.setLibrarySearch,
       setPage: state.setPage,
       openModal: state.openModal,
-    })),
+      activeCaseId: state.activeCaseId,
+      activeCase: state.activeCase,
+      setActiveSourceId: state.setActiveSourceId,
+    }))
   );
+
+  const [liveItems, setLiveItems] = useState<LibraryItem[]>([]);
+
+  useEffect(() => {
+    async function loadSources() {
+      if (!activeCaseId) return;
+      try {
+        const sources = await api.listCaseSources(activeCaseId);
+        if (sources && sources.length > 0) {
+          const mapped: LibraryItem[] = sources.map((s: ApiSourceFile) => {
+            const isImg = s.file_kind.includes("image") || s.file_kind === "dicom";
+            return {
+              icon: isImg ? "scan" : "file",
+              name: s.filename,
+              category: isImg ? "Imaging" : "Documents",
+              caseContext: activeCase || "Current case",
+              date: new Date(s.created_at).toLocaleDateString(),
+              status: s.parse_status === "parsed" ? "Verified" : s.parse_status,
+              page: isImg ? "imaging" : "ehr",
+            };
+          });
+          setLiveItems(mapped);
+        }
+      } catch {
+        // Backend offline fallback
+      }
+    }
+    loadSources();
+  }, [activeCaseId, activeCase]);
 
   const tabs = [
     "All files",
@@ -28,7 +70,9 @@ export function LibraryScreen() {
     "Conversations",
   ];
 
-  const filtered = INITIAL_LIBRARY_FILES.filter((f) => {
+  const allItems = [...liveItems, ...INITIAL_LIBRARY_FILES];
+
+  const filtered = allItems.filter((f) => {
     const matchesCategory =
       libraryType === "All files" || f.category === libraryType;
     const matchesSearch =
@@ -97,10 +141,15 @@ export function LibraryScreen() {
             </thead>
             <tbody id="library-rows">
               {filtered.length > 0 ? (
-                filtered.map((item) => (
+                filtered.map((item, idx) => (
                   <tr
-                    key={item.name}
-                    onClick={() => setPage(item.page)}
+                    key={`${item.name}-${idx}`}
+                    onClick={() => {
+                      if (item.category === "Imaging") {
+                        setActiveSourceId(null);
+                      }
+                      setPage(item.page);
+                    }}
                     style={{ cursor: "pointer" }}
                   >
                     <td>

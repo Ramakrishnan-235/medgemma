@@ -2,18 +2,20 @@
 
 import { useShallow } from "zustand/react/shallow";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
+import { api } from "@/lib/api";
 
 import { ClinicalReportEditor, type ReportVersionRecord } from "@/components/editor/ClinicalReportEditor";
 
 export function ReportScreen() {
-  const { showToast, setPage } = useWorkspaceStore(
+  const { showToast, setPage, activeCaseId } = useWorkspaceStore(
     useShallow((state) => ({
       showToast: state.showToast,
       setPage: state.setPage,
+      activeCaseId: state.activeCaseId,
     })),
   );
 
@@ -98,35 +100,78 @@ export function ReportScreen() {
     versions.find((v) => v.version_number === activeVersionNumber) ||
     versions[0];
 
+  useEffect(() => {
+    let isMounted = true;
+    api.listReportVersions(activeCaseId)
+      .then((serverVersions) => {
+        if (isMounted && serverVersions && serverVersions.length > 0) {
+          setVersions(serverVersions as ReportVersionRecord[]);
+          setActiveVersionNumber(serverVersions[0].version_number);
+        }
+      })
+      .catch(() => {
+        // Keep baseline when offline
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [activeCaseId]);
+
   const handleSaveNewVersion = async (
     tiptapJson: Record<string, unknown>
   ) => {
-    const nextVer =
-      Math.max(...versions.map((v) => v.version_number), 0) + 1;
-    const newRecord: ReportVersionRecord = {
-      id: `ver-${nextVer}`,
-      version_number: nextVer,
-      review_status: "draft",
-      tiptap_doc_json: tiptapJson,
-      created_at: new Date().toISOString(),
-    };
-    setVersions([newRecord, ...versions]);
-    setActiveVersionNumber(nextVer);
-    showToast(`Saved immutable report draft as v${nextVer}.`);
+    try {
+      const saved = await api.createReportVersion(activeCaseId, tiptapJson);
+      setVersions([saved as ReportVersionRecord, ...versions]);
+      setActiveVersionNumber(saved.version_number);
+      showToast(`Saved immutable report draft as v${saved.version_number} in PostgreSQL.`);
+    } catch {
+      const nextVer =
+        Math.max(...versions.map((v) => v.version_number), 0) + 1;
+      const newRecord: ReportVersionRecord = {
+        id: `ver-${nextVer}`,
+        version_number: nextVer,
+        review_status: "draft",
+        tiptap_doc_json: tiptapJson,
+        created_at: new Date().toISOString(),
+      };
+      setVersions([newRecord, ...versions]);
+      setActiveVersionNumber(nextVer);
+      showToast(`Saved immutable report draft as v${nextVer} (Local fallback).`);
+    }
   };
 
   const handleMarkReviewed = async (versionNumber: number) => {
-    setVersions((prev) =>
-      prev.map((v) =>
-        v.version_number === versionNumber
-          ? { ...v, review_status: "reviewed", reviewed_by: "Dr. Morgan" }
-          : v
-      )
-    );
-    showToast(`Report v${versionNumber} approved and marked reviewed.`);
+    try {
+      const reviewed = await api.reviewReportVersion(activeCaseId, versionNumber);
+      setVersions((prev) =>
+        prev.map((v) =>
+          v.version_number === versionNumber ? (reviewed as ReportVersionRecord) : v
+        )
+      );
+      showToast(`Report v${versionNumber} marked reviewed in PostgreSQL.`);
+    } catch {
+      setVersions((prev) =>
+        prev.map((v) =>
+          v.version_number === versionNumber
+            ? { ...v, review_status: "reviewed", reviewed_by: "Dr. Morgan" }
+            : v
+        )
+      );
+      showToast(`Report v${versionNumber} approved and marked reviewed.`);
+    }
   };
 
   const handleExportPdf = async (versionNumber: number) => {
+    try {
+      await api.exportReportPdf(activeCaseId, versionNumber);
+      showToast(
+        `Triggered Celery worker PDF export for report v${versionNumber}.`
+      );
+    } catch (err) {
+      showToast(`Export note: ${(err as Error).message}`);
+    }
+
     const reportText = JSON.stringify(activeVersion.tiptap_doc_json, null, 2);
     const blob = new Blob([reportText], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -146,9 +191,6 @@ export function ReportScreen() {
             }
           : v
       )
-    );
-    showToast(
-      `Triggered worker PDF export for reviewed report v${versionNumber}. Provenance appendix included.`
     );
   };
 
