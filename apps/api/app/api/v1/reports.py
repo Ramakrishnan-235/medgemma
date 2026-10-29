@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthenticatedPrincipal, get_authorized_case, get_current_principal
@@ -132,26 +133,35 @@ async def create_immutable_report_version(
                 }
             )
 
-    max_stmt = select(func.coalesce(func.max(ReportVersion.version_number), 0)).where(
-        ReportVersion.case_id == case.id,
-        ReportVersion.workspace_id == case.workspace_id,
-    )
-    next_ver = (await db.execute(max_stmt)).scalar_one() + 1
+    for attempt in range(3):
+        max_stmt = select(func.coalesce(func.max(ReportVersion.version_number), 0)).where(
+            ReportVersion.case_id == case.id,
+            ReportVersion.workspace_id == case.workspace_id,
+        )
+        next_ver = (await db.execute(max_stmt)).scalar_one() + 1
 
-    new_version = ReportVersion(
-        workspace_id=case.workspace_id,
-        case_id=case.id,
-        version_number=next_ver,
-        source_run_id=req.source_run_id,
-        tiptap_doc_json=req.tiptap_doc_json,
-        citations_snapshot_json=verified_Snapshots,
-        review_status="draft",
-        created_by=principal.user_id,
-    )
-    db.add(new_version)
-    await db.commit()
-    await db.refresh(new_version)
-    return _serialize_version(new_version)
+        new_version = ReportVersion(
+            workspace_id=case.workspace_id,
+            case_id=case.id,
+            version_number=next_ver,
+            source_run_id=req.source_run_id,
+            tiptap_doc_json=req.tiptap_doc_json,
+            citations_snapshot_json=verified_Snapshots,
+            review_status="draft",
+            created_by=principal.user_id,
+        )
+        db.add(new_version)
+        try:
+            await db.commit()
+            await db.refresh(new_version)
+            return _serialize_version(new_version)
+        except IntegrityError:
+            await db.rollback()
+            if attempt == 2:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Concurrent modification conflict while saving draft report.",
+                )
 
 
 @router.post("/versions/{version_number}/review", response_model=ReportVersionResponse)

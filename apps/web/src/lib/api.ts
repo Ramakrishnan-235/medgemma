@@ -68,9 +68,13 @@ export interface CitationView {
   citation_id?: string;
   evidence_chunk_id: string;
   source_file_id: string;
+  filename?: string;
+  encounter_date?: string | null;
   page_or_frame: number;
   bbox_norm?: { x0: number; y0: number; x1: number; y1: number } | null;
+  section_type?: string;
   verbatim_text: string;
+  page_preview_url?: string | null;
 }
 
 export interface ReportVersion {
@@ -98,6 +102,11 @@ export interface StudyAnnotation {
 
 export interface ViewerManifest {
   source_file_id: string;
+  filename?: string;
+  file_kind?: string;
+  raw_dicom_or_image_url?: string;
+  normalized_display_png_url?: string;
+  metadata?: Record<string, unknown>;
   study_title: string;
   study_date?: string | null;
   view_position?: string;
@@ -106,6 +115,25 @@ export interface ViewerManifest {
   image_width: number;
   image_height: number;
   annotations: StudyAnnotation[];
+}
+
+export interface ExtractionFieldItem {
+  id: string;
+  label: string;
+  value: string;
+  unit?: string;
+  reference_range?: string;
+  confidence?: number;
+  page?: number;
+  bbox_norm?: { x0: number; y0: number; x1: number; y1: number } | null;
+}
+
+export interface ExtractionResult {
+  run_id: string;
+  case_id: string;
+  source_file_id?: string | null;
+  review_status: string;
+  fields: ExtractionFieldItem[];
 }
 
 export const API_BASE_URL =
@@ -238,28 +266,52 @@ class MedGemmaApiClient {
     const url = `${API_BASE_URL}/api/v1/cases/${caseId}/runs/${runId}/events${this.token ? `?token=${this.token}` : ""}`;
     const es = new EventSource(url);
 
-    es.addEventListener("snapshot", (e: MessageEvent) => {
+    const dispatchNormalized = (eventName: string, rawData: string) => {
+      let data: Record<string, unknown>;
       try {
-        onEvent("snapshot", JSON.parse(e.data));
+        data = JSON.parse(rawData);
       } catch {
-        onEvent("snapshot", { raw: e.data });
+        data = { raw: rawData };
       }
+      if (data.output_json && !data.output) {
+        data.output = data.output_json;
+      }
+      if (data.metrics_json && !data.metrics) {
+        data.metrics = data.metrics_json;
+      }
+      if (typeof data.output === "object" && data.output !== null) {
+        const out = data.output as Record<string, unknown>;
+        if (out.comparison_summary_markdown && !out.comparison_findings) {
+          out.comparison_findings = out.comparison_summary_markdown;
+        }
+      }
+      onEvent(eventName, data);
+    };
+
+    es.addEventListener("snapshot", (e: MessageEvent) => {
+      dispatchNormalized("snapshot", e.data);
+    });
+
+    es.addEventListener("status", (e: MessageEvent) => {
+      dispatchNormalized("status", e.data);
     });
 
     es.addEventListener("token", (e: MessageEvent) => {
-      try {
-        onEvent("token", JSON.parse(e.data));
-      } catch {
-        onEvent("token", { raw: e.data });
-      }
+      dispatchNormalized("token", e.data);
     });
 
     es.addEventListener("completed", (e: MessageEvent) => {
-      try {
-        onEvent("completed", JSON.parse(e.data));
-      } catch {
-        onEvent("completed", { raw: e.data });
-      }
+      dispatchNormalized("completed", e.data);
+      es.close();
+    });
+
+    es.addEventListener("failed", (e: MessageEvent) => {
+      dispatchNormalized("failed", e.data);
+      es.close();
+    });
+
+    es.addEventListener("cancelled", (e: MessageEvent) => {
+      dispatchNormalized("cancelled", e.data);
       es.close();
     });
 
@@ -332,7 +384,32 @@ class MedGemmaApiClient {
   // --- Medical Imaging & Annotations ---
 
   async getViewerManifest(caseId: string, sourceFileId: string): Promise<ViewerManifest> {
-    return this.request<ViewerManifest>(`/api/v1/cases/${caseId}/imaging/studies/${sourceFileId}/viewer-manifest`);
+    const raw = await this.request<any>(`/api/v1/cases/${caseId}/imaging/studies/${sourceFileId}/viewer-manifest`);
+    return {
+      source_file_id: raw.source_file_id,
+      filename: raw.filename,
+      file_kind: raw.file_kind,
+      raw_dicom_or_image_url: raw.raw_dicom_or_image_url,
+      normalized_display_png_url: raw.normalized_display_png_url,
+      metadata: raw.metadata || {},
+      study_title: raw.filename || "Chest Study",
+      study_date: raw.metadata?.study_date || null,
+      view_position: raw.metadata?.view_position || "PA",
+      image_url: raw.normalized_display_png_url || raw.raw_dicom_or_image_url,
+      is_dicom: raw.file_kind === "dicom",
+      image_width: raw.metadata?.columns || 2048,
+      image_height: raw.metadata?.rows || 2048,
+      annotations: (raw.annotations || []).map((a: any) => ({
+        id: a.id,
+        source_file_id: raw.source_file_id,
+        frame_index: a.frame_index ?? 0,
+        origin: a.origin ?? "manual",
+        anatomical_label: a.anatomical_label,
+        finding_text: a.finding_text ?? null,
+        bbox_norm: a.bbox_norm,
+        review_state: a.review_state ?? "accepted",
+      })),
+    };
   }
 
   async createAnnotation(
@@ -380,6 +457,37 @@ class MedGemmaApiClient {
       body: JSON.stringify({
         current_source_file_id: currentSourceId,
         prior_source_file_id: priorSourceId,
+      }),
+    });
+  }
+
+  // --- Document Extraction ---
+
+  async triggerDocumentExtraction(
+    caseId: string,
+    sourceFileId?: string,
+    targetFields: string[] = ["date", "specimen", "hemoglobin", "wbc", "platelets"]
+  ): Promise<ExtractionResult> {
+    return this.request<ExtractionResult>(`/api/v1/cases/${caseId}/runs/extract-fields`, {
+      method: "POST",
+      body: JSON.stringify({
+        source_file_id: sourceFileId || null,
+        target_fields: targetFields,
+      }),
+    });
+  }
+
+  async saveFieldCorrections(
+    caseId: string,
+    runId: string,
+    corrections: Record<string, string>,
+    reviewStatus: string = "reviewed"
+  ): Promise<ExtractionResult> {
+    return this.request<ExtractionResult>(`/api/v1/cases/${caseId}/runs/${runId}/corrections`, {
+      method: "POST",
+      body: JSON.stringify({
+        review_status: reviewStatus,
+        corrections,
       }),
     });
   }

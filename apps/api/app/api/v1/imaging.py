@@ -1,3 +1,4 @@
+from app.schemas.imaging import StudyManifestResponse
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
@@ -54,12 +55,12 @@ class TriggerLongitudinalXrayRequest(BaseModel):
     )
 
 
-@router.get("/studies/{source_file_id}/viewer-manifest")
+@router.get("/studies/{source_file_id}/viewer-manifest", response_model=StudyManifestResponse)
 async def get_xray_viewer_manifest(
     source_file_id: uuid.UUID,
     case: Case = Depends(get_authorized_case),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> Any:
     """
     Returns short-lived presigned URLs for both the original DICOM/PNG file and
     the normalized display PNG, plus DICOM windowing metadata and saved annotations.

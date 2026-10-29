@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import AuthenticatedPrincipal, get_authorized_case, get_current_principal
@@ -49,34 +49,30 @@ async def list_cases(
 ) -> list[CaseResponse]:
     """Lists all clinical cases strictly scoped to the caller's workspace."""
     stmt = (
-        select(Case)
+        select(Case, func.count(SourceFile.id).label("sources_count"))
+        .outerjoin(
+            SourceFile,
+            (SourceFile.case_id == Case.id) & (SourceFile.workspace_id == principal.workspace_id),
+        )
         .where(Case.workspace_id == principal.workspace_id)
+        .group_by(Case.id)
         .order_by(desc(Case.created_at))
     )
     result = await db.execute(stmt)
-    cases = result.scalars().all()
+    rows = result.all()
 
-    items: list[CaseResponse] = []
-    for c in cases:
-        sources_stmt = select(SourceFile).where(
-            SourceFile.case_id == c.id,
-            SourceFile.workspace_id == principal.workspace_id,
+    return [
+        CaseResponse(
+            id=c.id,
+            workspace_id=c.workspace_id,
+            patient_code=c.patient_code,
+            title=c.title,
+            status=c.status,
+            created_at=c.created_at,
+            sources_count=count,
         )
-        sources_res = await db.execute(sources_stmt)
-        count = len(sources_res.scalars().all())
-
-        items.append(
-            CaseResponse(
-                id=c.id,
-                workspace_id=c.workspace_id,
-                patient_code=c.patient_code,
-                title=c.title,
-                status=c.status,
-                created_at=c.created_at,
-                sources_count=count,
-            )
-        )
-    return items
+        for c, count in rows
+    ]
 
 
 @router.post("", response_model=CaseResponse, status_code=status.HTTP_201_CREATED)
