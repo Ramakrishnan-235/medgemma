@@ -1,3 +1,4 @@
+import os
 import uuid
 from functools import lru_cache
 from typing import Any
@@ -20,7 +21,7 @@ def get_cpu_embedder() -> Any:
     """
     Singleton loaded once per worker process on CPU (~130 MB RAM).
     """
-    if SentenceTransformer is not None:
+    if os.environ.get("MEDGEMMA_MODE") != "mock_deterministic" and SentenceTransformer is not None:
         return SentenceTransformer(E5_MODEL_NAME, device="cpu")
 
     class MockEmbedder:
