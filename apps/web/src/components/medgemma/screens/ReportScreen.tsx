@@ -9,6 +9,39 @@ import { Icon } from "../Icons";
 import { api } from "@/lib/api";
 
 import { ClinicalReportEditor, type ReportVersionRecord } from "@/components/editor/ClinicalReportEditor";
+import { useImagingStore } from "@/stores/useImagingStore";
+
+function extractSectionsFromTiptap(json: Record<string, unknown> | undefined) {
+  let tech = "";
+  let find = "";
+  let impr = "";
+  let limit = "";
+
+  if (json && Array.isArray((json as { content?: unknown[] }).content)) {
+    const content = (json as { content: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }> }).content;
+    for (const node of content) {
+      if (node.type === "paragraph" && Array.isArray(node.content)) {
+        const fullText = node.content.map((c) => c.text || "").join("").trim();
+        if (fullText.toUpperCase().startsWith("TECHNIQUE:")) {
+          tech = fullText.replace(/^TECHNIQUE:\s*/i, "");
+        } else if (fullText.toUpperCase().startsWith("FINDINGS:")) {
+          find = fullText.replace(/^FINDINGS:\s*/i, "");
+        } else if (fullText.toUpperCase().startsWith("IMPRESSION:")) {
+          impr = fullText.replace(/^IMPRESSION:\s*/i, "");
+        } else if (fullText.toUpperCase().startsWith("LIMITATIONS:")) {
+          limit = fullText.replace(/^LIMITATIONS:\s*/i, "");
+        }
+      }
+    }
+  }
+
+  return {
+    technique: tech || undefined,
+    findings: find || undefined,
+    impression: impr || undefined,
+    limitations: limit || undefined,
+  };
+}
 
 export function ReportScreen() {
   const { showToast, setPage, activeCaseId } = useWorkspaceStore(
@@ -149,6 +182,11 @@ export function ReportScreen() {
           v.version_number === versionNumber ? (reviewed as ReportVersionRecord) : v
         )
       );
+      useWorkspaceStore.getState().setCases(
+        useWorkspaceStore.getState().cases.map((c) =>
+          c.id === "024" || c.id === activeCaseId ? { ...c, status: "Reviewed" } : c
+        )
+      );
       showToast(`Report v${versionNumber} marked reviewed in PostgreSQL.`);
     } catch {
       setVersions((prev) =>
@@ -156,6 +194,11 @@ export function ReportScreen() {
           v.version_number === versionNumber
             ? { ...v, review_status: "reviewed", reviewed_by: "Dr. Morgan" }
             : v
+        )
+      );
+      useWorkspaceStore.getState().setCases(
+        useWorkspaceStore.getState().cases.map((c) =>
+          c.id === "024" || c.id === activeCaseId ? { ...c, status: "Reviewed" } : c
         )
       );
       showToast(`Report v${versionNumber} approved and marked reviewed.`);
@@ -213,11 +256,96 @@ export function ReportScreen() {
     limitations: false,
   });
 
+  const handleSwitchToSections = () => {
+    const extracted = extractSectionsFromTiptap(activeVersion.tiptap_doc_json);
+    if (extracted.technique) setTechnique(extracted.technique);
+    if (extracted.findings) setFindings(extracted.findings);
+    if (extracted.impression) setImpression(extracted.impression);
+    if (extracted.limitations) setLimitations(extracted.limitations);
+    setEditorMode("sections");
+  };
+
+  const handleSwitchToTiptap = () => {
+    const updatedContent = [
+      {
+        type: "heading",
+        attrs: { level: 3 },
+        content: [{ type: "text", text: "CHEST IMAGING REPORT — CASE 024" }],
+      },
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: `TECHNIQUE: ${technique} ` },
+          {
+            type: "citationChip",
+            attrs: {
+              citationId: "cit_1",
+              evidenceChunkId: "chunk-prior-001",
+              sourceFileId: "prior-study-001",
+              pageOrFrame: 1,
+              bboxNorm: { x0: 0.15, y0: 0.25, x1: 0.45, y1: 0.55 },
+              verbatimQuote: "Prior baseline chest CT study from 21 Jul 2026",
+            },
+          },
+          { type: "text", text: "." },
+        ],
+      },
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: `FINDINGS: ${findings} ` },
+          {
+            type: "citationChip",
+            attrs: {
+              citationId: "cit_2",
+              evidenceChunkId: "chunk-curr-002",
+              sourceFileId: "current-study-002",
+              pageOrFrame: 124,
+              bboxNorm: { x0: 0.55, y0: 0.6, x1: 0.78, y1: 0.85 },
+              verbatimQuote: "Right lower lobe consolidation on axial series slice 124",
+            },
+          },
+          { type: "text", text: "." },
+        ],
+      },
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: `IMPRESSION: ${impression}` }],
+      },
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: `LIMITATIONS: ${limitations}` }],
+      },
+    ];
+
+    const updatedDoc = {
+      type: "doc",
+      content: updatedContent,
+    };
+
+    activeVersion.tiptap_doc_json = updatedDoc;
+    setVersions((prev) =>
+      prev.map((v) =>
+        v.version_number === activeVersion.version_number
+          ? { ...v, tiptap_doc_json: updatedDoc }
+          : v
+      )
+    );
+    setEditorMode("tiptap");
+  };
+
   const handleSave = () => {
-    showToast("Saved in this design preview. No backend is connected.");
+    if (editorMode === "sections") {
+      handleSwitchToTiptap();
+    }
+    showToast("Saved draft version in local session preview.");
   };
 
   const handleExport = () => {
+    if (!checkedItems.images || !checkedItems.findings || !checkedItems.limitations) {
+      showToast("Pre-export verification checklist pending: Please verify the 3 safety checks.");
+    }
+
     const reportText = `MEDGEMMA UI DEMONSTRATION — UNREVIEWED DRAFT
 Fictional case. No medical analysis performed.
 
@@ -256,20 +384,34 @@ ${limitations}`;
               <button
                 type="button"
                 className={editorMode === "tiptap" ? "selected" : ""}
-                onClick={() => setEditorMode("tiptap")}
+                onClick={handleSwitchToTiptap}
               >
                 Tiptap Rich Editor
               </button>
               <button
                 type="button"
                 className={editorMode === "sections" ? "selected" : ""}
-                onClick={() => setEditorMode("sections")}
+                onClick={handleSwitchToSections}
               >
                 Structured Sections
               </button>
             </div>
             <button type="button" className="btn" onClick={handleSave}>
               <Icon name="check" /> Save draft
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                const text = `TECHNIQUE\n${technique}\n\nFINDINGS\n${findings}\n\nIMPRESSION\n${impression}\n\nLIMITATIONS\n${limitations}`;
+                if (typeof navigator !== "undefined" && navigator.clipboard) {
+                  navigator.clipboard.writeText(text);
+                }
+                showToast("Report draft copied to clipboard.");
+              }}
+              title="Copy plain text to clipboard"
+            >
+              <Icon name="file" /> Copy
             </button>
             <button
               type="button"
@@ -297,10 +439,20 @@ ${limitations}`;
               onMarkReviewed={handleMarkReviewed}
               onExportPdf={handleExportPdf}
               onOpenPdfCitation={(attrs) => {
+                if (attrs.pageOrFrame) {
+                  useWorkspaceStore.getState().setSliceIndex(attrs.pageOrFrame);
+                }
+                if (attrs.bboxNorm) {
+                  useImagingStore.getState().focusCitationOnViewer(attrs.sourceFileId, attrs.bboxNorm);
+                }
+                if (attrs.sourceFileId?.includes("prior")) {
+                  setPage("compare");
+                } else {
+                  setPage("imaging");
+                }
                 showToast(
                   `Navigating to cited evidence: ${attrs.citationId} (${attrs.sourceFileId} p.${attrs.pageOrFrame})`
                 );
-                setPage("imaging");
               }}
             />
           </div>

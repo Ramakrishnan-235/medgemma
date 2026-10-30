@@ -100,7 +100,7 @@ export function LongitudinalXrayWorkspace({
           </label>
 
           {featureModelBoxesEnabled && (
-            <label className="flex items-center gap-1.5 cursor-pointer text-amber-400">
+            <label className="flex items-center gap-1.5 cursor-pointer text-zinc-400 hover:text-zinc-200">
               <input
                 type="checkbox"
                 checked={showModelBoxes}
@@ -113,7 +113,7 @@ export function LongitudinalXrayWorkspace({
 
           <button
             onClick={onTriggerLongitudinalRun}
-            className="px-3.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition"
+            className="px-3.5 py-1.5 rounded-md bg-zinc-100 hover:bg-white text-zinc-950 font-medium transition"
           >
             Compare Interval Change (MedGemma 1.5)
           </button>
@@ -122,7 +122,7 @@ export function LongitudinalXrayWorkspace({
 
       {/* Automatic Projection Mismatch Banner */}
       {projectionMismatch && (
-        <div className="px-3 py-2 rounded-md bg-amber-950/60 border border-amber-800/80 text-amber-200 text-xs">
+        <div className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs">
           <strong>Projection Warning:</strong> Prior study is{" "}
           <span className="font-mono">{priorStudy.metadata.view_position}</span> while Current
           study is <span className="font-mono">{currentStudy.metadata.view_position}</span>.
@@ -142,7 +142,7 @@ export function LongitudinalXrayWorkspace({
           isDicom={false}
           imageWidth={priorStudy.metadata.columns || 1024}
           imageHeight={priorStudy.metadata.rows || 1024}
-          annotations={priorStudy.annotations}
+          annotations={priorStudy.annotations || []}
         />
 
         <ChestXrayViewport
@@ -155,7 +155,7 @@ export function LongitudinalXrayWorkspace({
           isDicom={false}
           imageWidth={currentStudy.metadata.columns || 1024}
           imageHeight={currentStudy.metadata.rows || 1024}
-          annotations={currentStudy.annotations}
+          annotations={currentStudy.annotations || []}
         />
       </div>
     </div>

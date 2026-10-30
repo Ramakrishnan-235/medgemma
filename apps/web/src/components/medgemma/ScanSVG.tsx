@@ -51,7 +51,7 @@ export function ScanSVG({ type = "axial" }: { type?: "axial" | "volume" }) {
           fill="#b5b5bc"
         />
         <ellipse cy="83" rx="22" ry="20" fill="#d6d6dc" />
-        <ellipse cy="83" rx="10" ry="10" fill="#77777e" />
+        <ellipse cy="83" rx="10" ry="10" fill="#71717a" />
         <g fill="#d2d2d9">
           {[-1, 1].map((side) =>
             [-70, -35, 0, 35, 65].map((y, j) => (

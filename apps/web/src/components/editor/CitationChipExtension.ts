@@ -31,7 +31,7 @@ const CitationChipComponent: React.FC<NodeViewProps> = ({ node, extension }) => 
       "button",
       {
         type: "button",
-        title: `${attrs.verbatimQuote || "Source citation"} (Page/Frame ${attrs.pageOrFrame})`,
+        title: `Citation [${attrs.citationId}] · ${attrs.sourceFileId} (p.${attrs.pageOrFrame})${attrs.verbatimQuote ? ` — "${attrs.verbatimQuote}"` : ""}`,
         onClick: (e: React.MouseEvent) => {
           e.preventDefault();
           e.stopPropagation();
@@ -39,13 +39,13 @@ const CitationChipComponent: React.FC<NodeViewProps> = ({ node, extension }) => 
         },
         className:
           "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-medium " +
-          "bg-emerald-950/90 text-emerald-300 border border-emerald-700/70 " +
-          "hover:bg-emerald-900 hover:border-emerald-400 transition cursor-pointer",
+          "bg-zinc-900 text-zinc-200 border border-zinc-700 " +
+          "hover:bg-zinc-800 hover:border-zinc-500 hover:text-zinc-50 transition cursor-pointer",
       },
       `[${attrs.citationId}]`,
       React.createElement(
         "span",
-        { className: "text-[10px] text-emerald-400/80" },
+        { className: "text-[10px] text-zinc-400" },
         `p.${attrs.pageOrFrame}`
       )
     )

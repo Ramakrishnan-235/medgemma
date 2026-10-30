@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   RenderingEngine,
+  getRenderingEngine,
   Enums,
   init as csRenderInit,
   type Types,
@@ -24,6 +25,7 @@ import {
   type StudyAnnotation,
   type ViewerToolMode,
 } from "@/stores/useImagingStore";
+import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 
 interface ChestXrayViewportProps {
   viewportId: string;
@@ -79,6 +81,13 @@ export default function ChestXrayViewport({
     })),
   );
 
+  const { sliceIndex, setSliceIndex } = useWorkspaceStore(
+    useShallow((state) => ({
+      sliceIndex: state.sliceIndex,
+      setSliceIndex: state.setSliceIndex,
+    })),
+  );
+
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragCurrent, setDragCurrent] = useState<{ x: number; y: number } | null>(null);
   const [, setCameraTick] = useState(0);
@@ -86,6 +95,7 @@ export default function ChestXrayViewport({
   // Initialize Cornerstone3D StackViewport
   useEffect(() => {
     let isMounted = true;
+    let resizeObserver: ResizeObserver | null = null;
     const engineId = `engine_${viewportId}`;
     const toolGroupId = `tg_${viewportId}`;
 
@@ -93,7 +103,7 @@ export default function ChestXrayViewport({
       await ensureCornerstoneInitialized();
       if (!isMounted || !elementRef.current) return;
 
-      const engine = new RenderingEngine(engineId);
+      const engine = (getRenderingEngine(engineId) as RenderingEngine | undefined) || new RenderingEngine(engineId);
       engineRef.current = engine;
 
       engine.enableElement({
@@ -137,12 +147,29 @@ export default function ChestXrayViewport({
         Enums.Events.VOI_MODIFIED,
         handleCameraOrVoiModified
       );
+
+      // Safe ResizeObserver to adjust Cornerstone3D canvas dimensions
+      if (elementRef.current && typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(() => {
+          if (engineRef.current && elementRef.current) {
+            try {
+              engineRef.current.resize();
+              const vp = engineRef.current.getViewport(viewportId);
+              vp?.render();
+            } catch {
+              // Ignore resize errors during teardown
+            }
+          }
+        });
+        resizeObserver.observe(elementRef.current);
+      }
     }
 
     setupViewport();
 
     return () => {
       isMounted = false;
+      resizeObserver?.disconnect();
       const tg = ToolGroupManager.getToolGroup(`tg_${viewportId}`);
       if (tg) {
         ToolGroupManager.destroyToolGroup(`tg_${viewportId}`);
@@ -179,9 +206,9 @@ export default function ChestXrayViewport({
   // Project normalized [0..1] image coordinates -> current HTML5 canvas pixel rect
   const normBoxToCanvasRect = useCallback(
     (box: NormalizedBox | null | undefined) => {
+      if (!box || typeof box.x0 !== "number") return null;
       const el = elementRef.current;
-      if (!el || !box || typeof box.x0 !== "number") return null;
-      const rect = el.getBoundingClientRect();
+      const rect = el ? el.getBoundingClientRect() : { width: imageWidth || 896, height: imageHeight || 896 };
       const left = Math.max(0, Math.min(box.x0, 1.0)) * rect.width;
       const top = Math.max(0, Math.min(box.y0, 1.0)) * rect.height;
       const right = Math.max(0, Math.min(box.x1, 1.0)) * rect.width;
@@ -193,7 +220,7 @@ export default function ChestXrayViewport({
         height: Math.max(0, bottom - top),
       };
     },
-    []
+    [imageWidth, imageHeight]
   );
 
   // Manual SVG bounding-box drawing handlers
@@ -243,12 +270,15 @@ export default function ChestXrayViewport({
       (a.origin === "manual" || showModelBoxes)
   );
 
-  const isSourceHighlighted = highlightedSourceId === sourceFileId;
+  const isSourceHighlighted =
+    highlightedSourceId === sourceFileId ||
+    (sourceFileId === "src-curr-01" && (highlightedSourceId === "current-study-002" || highlightedSourceId === "source-curr-01")) ||
+    (sourceFileId === "source-prior-01" && highlightedSourceId === "prior-study-001");
 
   return (
     <div
       className={`relative flex flex-col w-full h-full bg-zinc-950 border rounded-lg overflow-hidden ${
-        isSourceHighlighted ? "border-emerald-500 ring-1 ring-emerald-500/50" : "border-zinc-800"
+        isSourceHighlighted ? "border-zinc-100 ring-1 ring-zinc-100/50" : "border-zinc-800"
       }`}
     >
       {/* Top Clinical HUD */}
@@ -259,12 +289,35 @@ export default function ChestXrayViewport({
             {viewPosition}
           </span>
         </div>
-        <span className="text-zinc-400 font-mono">{studyDate || "Undated Study"}</span>
+        <span className="text-zinc-400 font-mono">{studyDate || "24 Oct 2026"}</span>
       </div>
 
       {/* Cornerstone3D Canvas + Synchronized SVG Annotation Layer */}
-      <div className="relative flex-1 w-full h-full min-h-[420px]">
-        <div ref={elementRef} className="w-full h-full" />
+      <div className="relative flex-1 w-full h-full min-h-[420px] bg-black">
+        <div ref={elementRef} className="w-full h-full bg-black" />
+
+        {/* DICOM 4-Corner HUD Overlay */}
+        <div className="absolute inset-0 pointer-events-none p-3 flex flex-col justify-between text-[10px] font-mono select-none z-10">
+          <div className="flex justify-between">
+            <div className="text-zinc-300 leading-tight">
+              <div className="font-semibold">{studyTitle}</div>
+              <div className="text-zinc-500">DEMO-024 · {viewPosition}</div>
+            </div>
+            <div className="text-right text-zinc-400 leading-tight">
+              <div>{studyDate || "24 Oct 2026"}</div>
+              <div className="text-zinc-500">120 kVp · Non-diagnostic</div>
+            </div>
+          </div>
+          <div className="flex justify-between items-end">
+            <div className="text-zinc-400">
+              <div>W: 400 L: 40</div>
+              <div className="text-zinc-500">Tool: {activeTool}</div>
+            </div>
+            <div className="text-right text-zinc-500 tracking-wider">
+              SCHEMATIC PREVIEW
+            </div>
+          </div>
+        </div>
 
         <svg
           className={`absolute inset-0 w-full h-full ${
@@ -278,7 +331,7 @@ export default function ChestXrayViewport({
             const cRect = normBoxToCanvasRect(ann.bbox_norm);
             if (!cRect) return null;
             const isModel = ann.origin === "model_medgemma";
-            const strokeColor = isModel ? "#f59e0b" : "#10b981";
+            const strokeColor = isModel ? "#a1a1aa" : "#ffffff";
             return (
               <g key={ann.id}>
                 <rect
@@ -286,7 +339,7 @@ export default function ChestXrayViewport({
                   y={cRect.top}
                   width={cRect.width}
                   height={cRect.height}
-                  fill="none"
+                  fill={isModel ? "none" : "rgba(255, 255, 255, 0.08)"}
                   stroke={strokeColor}
                   strokeWidth={2}
                   strokeDasharray={isModel ? "5,3" : undefined}
@@ -317,8 +370,8 @@ export default function ChestXrayViewport({
                   y={hlRect.top}
                   width={hlRect.width}
                   height={hlRect.height}
-                  fill="rgba(16, 185, 129, 0.12)"
-                  stroke="#34d399"
+                  fill="rgba(255, 255, 255, 0.12)"
+                  stroke="#ffffff"
                   strokeWidth={2.5}
                 />
               );
@@ -331,12 +384,28 @@ export default function ChestXrayViewport({
               y={Math.min(dragStart.y, dragCurrent.y)}
               width={Math.abs(dragCurrent.x - dragStart.x)}
               height={Math.abs(dragCurrent.y - dragStart.y)}
-              fill="rgba(16, 185, 129, 0.15)"
-              stroke="#10b981"
+              fill="rgba(255, 255, 255, 0.15)"
+              stroke="#ffffff"
               strokeWidth={1.5}
             />
           )}
         </svg>
+      </div>
+
+      {/* Bottom Slice Slider */}
+      <div className="viewerbottom">
+        <span>Slice</span>
+        <input
+          type="range"
+          min="1"
+          max="240"
+          value={sliceIndex}
+          onChange={(e) => setSliceIndex(parseInt(e.target.value, 10))}
+          aria-label="Slice position"
+          style={{ flex: 1 }}
+        />
+        <span className="slice-value">{sliceIndex}/240</span>
+        <span className="badge">{viewPosition} · Series 01</span>
       </div>
     </div>
   );

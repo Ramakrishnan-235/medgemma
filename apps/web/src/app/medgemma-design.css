@@ -2695,3 +2695,65 @@ details p {
     font-size: 36px;
   }
 }
+
+/* ==========================================================================
+   TipTap ProseMirror Typography & Spacing
+   ========================================================================== */
+.tiptap.ProseMirror {
+  min-height: 380px;
+  outline: none;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #f4f4f5;
+  padding: 20px 24px;
+}
+
+.tiptap.ProseMirror h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-top: 18px;
+  margin-bottom: 8px;
+  letter-spacing: -0.3px;
+}
+
+.tiptap.ProseMirror h3 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #a1a1aa;
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+
+.tiptap.ProseMirror p {
+  margin-top: 4px;
+  margin-bottom: 12px;
+  color: #e4e4e7;
+}
+
+.tiptap.ProseMirror ul {
+  list-style-type: disc;
+  padding-left: 20px;
+  margin: 8px 0 12px;
+}
+
+.tiptap.ProseMirror ol {
+  list-style-type: decimal;
+  padding-left: 20px;
+  margin: 8px 0 12px;
+}
+
+.tiptap.ProseMirror li {
+  margin-bottom: 4px;
+}
+
+.tiptap.ProseMirror blockquote {
+  border-left: 2px solid #3f3f46;
+  padding-left: 12px;
+  margin: 10px 0;
+  color: #a1a1aa;
+  font-style: italic;
+}
+

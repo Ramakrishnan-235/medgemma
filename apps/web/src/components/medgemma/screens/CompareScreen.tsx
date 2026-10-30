@@ -1,9 +1,9 @@
 "use client";
 
 import { useShallow } from "zustand/react/shallow";
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
-import { Heading, Badge } from "../CommonUI";
+import { Heading, ContextBar, Badge } from "../CommonUI";
 import { Viewer } from "../Viewer";
 import { Icon } from "../Icons";
 import { LongitudinalXrayWorkspace } from "@/components/viewer";
@@ -21,8 +21,23 @@ export function CompareScreen() {
   const [compareMode, setCompareMode] = useState<"cornerstone" | "schematic">("cornerstone");
   const [isComparing, setIsComparing] = useState(false);
   const [liveImpression, setLiveImpression] = useState<string | null>(null);
+  const activeEventSourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeEventSourceRef.current) {
+        activeEventSourceRef.current.close();
+        activeEventSourceRef.current = null;
+      }
+    };
+  }, []);
 
   const handleTriggerAnalysis = async () => {
+    if (activeEventSourceRef.current) {
+      activeEventSourceRef.current.close();
+      activeEventSourceRef.current = null;
+    }
+
     setIsComparing(true);
     setLiveImpression("Triggering vLLM longitudinal comparison...");
     try {
@@ -31,26 +46,42 @@ export function CompareScreen() {
         "source-curr-01",
         "source-prior-01"
       );
-      api.subscribeRunEvents(
+      const es = api.subscribeRunEvents(
         activeCaseId,
         run.run_id,
         (event, data) => {
           if (event === "token") {
             const token = (data.token_delta as string) || (data.token as string) || "";
-            setLiveImpression((prev) => (prev ?? "") + token);
+            setLiveImpression((prev) => {
+              if (prev === "Triggering vLLM longitudinal comparison...") {
+                return token;
+              }
+              return (prev ?? "") + token;
+            });
           } else if (event === "completed") {
-            const output = data.output as { comparison_findings?: string } | undefined;
-            if (output?.comparison_findings) {
-              setLiveImpression(output.comparison_findings);
+            const output = data.output as { comparison_findings?: string; comparison_summary_markdown?: string } | undefined;
+            const findings = output?.comparison_findings || output?.comparison_summary_markdown;
+            if (findings) {
+              setLiveImpression(findings);
             }
             setIsComparing(false);
+            activeEventSourceRef.current = null;
             showToast("Longitudinal comparison complete.");
+          } else if (event === "failed" || event === "cancelled") {
+            setIsComparing(false);
+            activeEventSourceRef.current = null;
+            showToast(`Comparison run ${event}.`);
           }
         },
-        () => setIsComparing(false)
+        () => {
+          setIsComparing(false);
+          activeEventSourceRef.current = null;
+        }
       );
+      activeEventSourceRef.current = es;
     } catch {
       setIsComparing(false);
+      activeEventSourceRef.current = null;
       setLiveImpression(
         "Partial resolution of right lower lobe consolidation compared to 21 Jul 2026. No new acute focal infiltrates. Heart size remains within normal limits. (Mock deterministic fallback mode)."
       );
@@ -65,16 +96,27 @@ export function CompareScreen() {
         title="Side by side. What changed?"
         desc="Synchronized Cornerstone3D dual-viewport tracking of interval pulmonary changes."
         actions={
-          <button
-            type="button"
-            className="btn black"
-            onClick={handleTriggerAnalysis}
-            disabled={isComparing}
-          >
-            <Icon name="scan" /> {isComparing ? "Analyzing..." : "Analyze changes"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setPage("imaging")}
+            >
+              <Icon name="scan" /> Back to imaging
+            </button>
+            <button
+              type="button"
+              className="btn black"
+              onClick={handleTriggerAnalysis}
+              disabled={isComparing}
+            >
+              <Icon name="scan" /> {isComparing ? "Analyzing..." : "Analyze changes"}
+            </button>
+          </>
         }
       />
+
+      <ContextBar />
 
       {/* Synchronized Toolbar */}
       <div className="toolbar" style={{ justifyContent: "space-between", marginBottom: "16px" }}>
@@ -150,6 +192,15 @@ export function CompareScreen() {
         </div>
       )}
 
+      {/* 95-Day Elapsed Interval Timeline */}
+      <div className="timeline">
+        <span className="timepoint">21 Jul 2026</span>
+        <div className="track" />
+        <span className="muted small">95 days</span>
+        <div className="track" />
+        <span className="timepoint current">24 Oct 2026</span>
+      </div>
+
       {/* Interval Change Findings */}
       <section className="panel" style={{ marginTop: "24px" }}>
         <div className="panel-head">
@@ -158,9 +209,13 @@ export function CompareScreen() {
         </div>
         <div className="panel-pad">
           {liveImpression && (
-            <div className="note" style={{ marginBottom: "16px", borderColor: "#10b981" }}>
-              <b>Analysis Output:</b>
-              <p style={{ marginTop: 4 }}>{liveImpression}</p>
+            /* Milestone 4 remediation note: eliminated legacy inline borderColor: "#10b981" in favor of border border-zinc-800 */
+            <div className="note border border-zinc-800" style={{ marginBottom: "16px" }}>
+              <div className="row between">
+                <b>Analysis Output:</b>
+                {isComparing && <Badge text="Streaming" variant="soft" />}
+              </div>
+              <p style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>{liveImpression}</p>
             </div>
           )}
 
@@ -206,6 +261,10 @@ export function CompareScreen() {
           </div>
         </div>
       </section>
+
+      <div className="note" style={{ marginTop: "18px" }}>
+        The same schematic is used to demonstrate the comparison layout. These measurements do not describe an actual study.
+      </div>
     </>
   );
 }

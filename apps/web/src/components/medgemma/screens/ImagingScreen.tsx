@@ -10,7 +10,7 @@ import { Icon } from "../Icons";
 import { Viewer } from "../Viewer";
 import { ScanSVG } from "../ScanSVG";
 import { api } from "@/lib/api";
-import type { StudyAnnotation } from "@/stores/useImagingStore";
+import { useImagingStore, type StudyAnnotation, type ViewerToolMode } from "@/stores/useImagingStore";
 
 const ChestXrayViewport = dynamic(() => import("@/components/viewer/ChestXrayViewport"), {
   ssr: false,
@@ -33,6 +33,16 @@ export function ImagingScreen() {
       setPage: state.setPage,
       showToast: state.showToast,
       activeCaseId: state.activeCaseId,
+    })),
+  );
+
+  const { activeTool, setActiveTool, showModelBoxes, setShowModelBoxes, focusCitationOnViewer } = useImagingStore(
+    useShallow((state) => ({
+      activeTool: state.activeTool,
+      setActiveTool: state.setActiveTool,
+      showModelBoxes: state.showModelBoxes,
+      setShowModelBoxes: state.setShowModelBoxes,
+      focusCitationOnViewer: state.focusCitationOnViewer,
     })),
   );
 
@@ -137,7 +147,7 @@ export function ImagingScreen() {
 
       {/* Mode Switcher Tabs */}
       <div className="toolbar viewtabs">
-        <div className="tabs" aria-label="Imaging workspace mode">
+        <div className="tabs" role="tablist" aria-label="Imaging workspace mode">
           {[
             ["analysis", "Analysis"],
             ["volume", "3D & multiplanar"],
@@ -145,21 +155,56 @@ export function ImagingScreen() {
           ].map(([id, t]) => (
             <button
               key={id}
+              id={`tab-${id}`}
+              role="tab"
               type="button"
+              aria-selected={imagingMode === id}
+              aria-controls={`panel-${id}`}
+              tabIndex={imagingMode === id ? 0 : -1}
               className={imagingMode === id ? "selected" : ""}
-              onClick={() =>
-                setImagingMode(id as "analysis" | "volume" | "localization")
-              }
+              onClick={() => {
+                setImagingMode(id as "analysis" | "volume" | "localization");
+                if (id === "localization") {
+                  setShowModelBoxes(true);
+                }
+              }}
             >
               {t}
             </button>
           ))}
         </div>
 
-        <div className="row" style={{ gap: "8px" }}>
+        {/* Viewport Tools & Engine Switch */}
+        <div className="row viewer-tools" role="group" aria-label="Medical imaging tools" style={{ gap: "6px" }}>
+          {[
+            { id: "WindowLevel", label: "W/L Contrast" },
+            { id: "Pan", label: "Pan" },
+            { id: "Zoom", label: "Zoom" },
+            { id: "DrawBox", label: "Box ROI" },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`btn tiny ${activeTool === t.id ? "black" : ""}`}
+              aria-pressed={activeTool === t.id}
+              onClick={() => setActiveTool(t.id as ViewerToolMode)}
+            >
+              {t.label}
+            </button>
+          ))}
           <button
             type="button"
-            className={`btn small ${viewportEngine === "cornerstone" ? "black" : ""}`}
+            className={`btn tiny ${showModelBoxes ? "black" : ""}`}
+            aria-pressed={showModelBoxes}
+            onClick={() => setShowModelBoxes(!showModelBoxes)}
+          >
+            AI Boxes ({showModelBoxes ? "On" : "Off"})
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={viewportEngine === "cornerstone"}
+            className={`btn tiny ${viewportEngine === "cornerstone" ? "black" : ""}`}
             onClick={() => setViewportEngine(viewportEngine === "cornerstone" ? "schematic" : "cornerstone")}
           >
             {viewportEngine === "cornerstone" ? "Cornerstone3D Active" : "Schematic View"}
@@ -169,12 +214,18 @@ export function ImagingScreen() {
       </div>
 
       {/* Main Study Layout */}
-      <div className="study-layout">
+      <div
+        id={`panel-${imagingMode}`}
+        role="tabpanel"
+        aria-labelledby={`tab-${imagingMode}`}
+        className="study-layout"
+      >
         {/* Left Series Selector */}
-        <aside className="series">
+        <aside className="series" aria-label="Series selection">
           <small className="muted">SERIES</small>
           <button
             type="button"
+            aria-pressed={selectedSeries === "01"}
             className={selectedSeries === "01" ? "selected" : ""}
             onClick={() => handleSeriesClick("01")}
           >
@@ -183,6 +234,7 @@ export function ImagingScreen() {
           </button>
           <button
             type="button"
+            aria-pressed={selectedSeries === "02"}
             className={selectedSeries === "02" ? "selected" : ""}
             onClick={() => handleSeriesClick("02")}
           >
@@ -191,6 +243,7 @@ export function ImagingScreen() {
           </button>
           <button
             type="button"
+            aria-pressed={selectedSeries === "03"}
             className={selectedSeries === "03" ? "selected" : ""}
             onClick={() => handleSeriesClick("03")}
           >
@@ -271,7 +324,13 @@ export function ImagingScreen() {
             <strong>Active Annotations ({annotations.length})</strong>
             <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px" }}>
               {annotations.map((ann) => (
-                <div key={ann.id} className="row between" style={{ fontSize: "11px", padding: "4px 8px", background: "var(--soft)", border: "1px solid var(--line)", borderRadius: "4px" }}>
+                <div
+                  key={ann.id}
+                  className="row between cursor-pointer"
+                  style={{ fontSize: "11px", padding: "4px 8px", background: "var(--soft)", border: "1px solid var(--line)", borderRadius: "4px" }}
+                  onClick={() => focusCitationOnViewer(ann.source_file_id || "src-curr-01", ann.bbox_norm)}
+                  title="Click to focus annotation on viewport"
+                >
                   <span className="text-zinc-100">{ann.anatomical_label}</span>
                   <Badge text={ann.origin} variant={ann.origin === "model_medgemma" ? "soft" : "dash"} />
                 </div>

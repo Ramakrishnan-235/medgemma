@@ -58,8 +58,11 @@ export function ClinicalReportEditor({
     editorProps: {
       attributes: {
         class:
-          "prose prose-invert max-w-none min-h-[380px] p-4 focus:outline-none text-sm leading-relaxed text-zinc-100",
+          "tiptap ProseMirror max-w-none min-h-[380px] p-4 focus:outline-none text-sm leading-relaxed text-zinc-100",
       },
+    },
+    onUpdate: ({ editor: ed }) => {
+      activeVersion.tiptap_doc_json = ed.getJSON() as Record<string, unknown>;
     },
   });
 
@@ -90,9 +93,9 @@ export function ClinicalReportEditor({
   };
 
   const statusBadgeColor = {
-    draft: "bg-zinc-800 text-zinc-300 border-zinc-700",
-    reviewed: "bg-emerald-950 text-emerald-300 border-emerald-700",
-    exported: "bg-sky-950 text-sky-300 border-sky-700",
+    draft: "bg-zinc-900 text-zinc-300 border-zinc-700 border-dashed",
+    reviewed: "bg-zinc-100 text-zinc-950 border-zinc-200 font-semibold",
+    exported: "bg-zinc-800 text-zinc-200 border-zinc-700",
   }[activeVersion.review_status];
 
   return (
@@ -126,7 +129,7 @@ export function ClinicalReportEditor({
             type="button"
             onClick={handleSaveNewVersion}
             disabled={isSaving}
-            className="px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-medium transition disabled:opacity-50"
+            className="px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-medium border border-zinc-700 transition disabled:opacity-50"
           >
             {isSaving
               ? "Saving..."
@@ -137,7 +140,7 @@ export function ClinicalReportEditor({
             <button
               type="button"
               onClick={() => onMarkReviewed(activeVersion.version_number)}
-              className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition"
+              className="px-3 py-1.5 rounded-md bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition shadow-xs"
             >
               Approve & Mark v{activeVersion.version_number} Reviewed
             </button>
@@ -148,7 +151,7 @@ export function ClinicalReportEditor({
               type="button"
               onClick={handleExport}
               disabled={isExporting}
-              className="px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition disabled:opacity-50"
+              className="px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-medium border border-zinc-700 transition disabled:opacity-50"
             >
               {isExporting ? "Generating PDF..." : `Export v${activeVersion.version_number} PDF`}
             </button>
@@ -159,7 +162,7 @@ export function ClinicalReportEditor({
               href={activeVersion.export_download_url}
               target="_blank"
               rel="noreferrer"
-              className="px-2.5 py-1.5 rounded-md bg-zinc-900 border border-sky-700 text-sky-300 text-xs font-mono hover:bg-zinc-800"
+              className="px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs font-mono hover:bg-zinc-800"
             >
               Download PDF
             </a>
@@ -167,31 +170,120 @@ export function ClinicalReportEditor({
         </div>
       </div>
 
+      {/* Clinical Review Status Banner */}
+      {activeVersion.review_status === "draft" ? (
+        <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/60 border-b border-zinc-800 text-xs text-zinc-300">
+          <span className="flex items-center gap-1.5">
+            <strong className="text-zinc-100">AI DRAFT · UNREVIEWED</strong> — Multimodal inference output. Clinician sign-off required prior to export.
+          </span>
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono border border-zinc-700 bg-zinc-800 text-zinc-300">
+            Requires Review
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-4 py-2 bg-zinc-900/60 border-b border-zinc-800 text-xs text-zinc-200">
+          <span className="flex items-center gap-1.5">
+            <strong className="text-white">CLINICALLY REVIEWED</strong> — Approved by {activeVersion.reviewed_by || "Dr. Morgan"}. Verified for clinical record.
+          </span>
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-100 text-zinc-950 font-semibold">
+            Verified
+          </span>
+        </div>
+      )}
+
       {/* Formatting Toolbar */}
-      <div className="flex items-center gap-1 px-4 py-1.5 bg-zinc-950 border-b border-zinc-900 text-xs text-zinc-400">
+      <div className="flex flex-wrap items-center gap-1 px-4 py-1.5 bg-zinc-950 border-b border-zinc-800 text-xs text-zinc-400">
         <button
           type="button"
           onClick={() => editor?.chain().focus().toggleBold().run()}
-          className="px-2 py-1 rounded hover:bg-zinc-900 hover:text-zinc-100 font-semibold"
+          className={`px-2 py-1 rounded font-semibold transition ${
+            editor?.isActive("bold") ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Bold (Ctrl+B)"
         >
           Bold
         </button>
         <button
           type="button"
+          onClick={() => editor?.chain().focus().toggleItalic().run()}
+          className={`px-2 py-1 rounded italic transition ${
+            editor?.isActive("italic") ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Italic (Ctrl+I)"
+        >
+          Italic
+        </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+          className={`px-2 py-1 rounded transition ${
+            editor?.isActive("heading", { level: 2 }) ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Heading 2"
+        >
+          H2
+        </button>
+        <button
+          type="button"
           onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
-          className="px-2 py-1 rounded hover:bg-zinc-900 hover:text-zinc-100"
+          className={`px-2 py-1 rounded transition ${
+            editor?.isActive("heading", { level: 3 }) ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Section Header (H3)"
         >
           Section Header
         </button>
         <button
           type="button"
           onClick={() => editor?.chain().focus().toggleBulletList().run()}
-          className="px-2 py-1 rounded hover:bg-zinc-900 hover:text-zinc-100"
+          className={`px-2 py-1 rounded transition ${
+            editor?.isActive("bulletList") ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Bullet List"
         >
           Bullet List
         </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+          className={`px-2 py-1 rounded transition ${
+            editor?.isActive("orderedList") ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Numbered List"
+        >
+          Numbered List
+        </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+          className={`px-2 py-1 rounded transition ${
+            editor?.isActive("blockquote") ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+          }`}
+          title="Blockquote"
+        >
+          Quote
+        </button>
+        <div className="h-4 w-px bg-zinc-800 mx-1" />
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().undo().run()}
+          disabled={!editor?.can().undo()}
+          className="px-2 py-1 rounded text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-40"
+          title="Undo (Ctrl+Z)"
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          onClick={() => editor?.chain().focus().redo().run()}
+          disabled={!editor?.can().redo()}
+          className="px-2 py-1 rounded text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 disabled:opacity-40"
+          title="Redo (Ctrl+Y)"
+        >
+          Redo
+        </button>
         <span className="ml-auto text-[11px] text-zinc-500">
-          Click any green [cit_X] chip to reopen its exact source region
+          Click any [cit_X] chip to jump to Cornerstone3D slice & highlight ROI
         </span>
       </div>
 
