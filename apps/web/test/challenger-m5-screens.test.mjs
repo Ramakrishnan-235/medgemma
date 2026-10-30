@@ -223,14 +223,17 @@ describe('Empirical Challenger: Milestone 5 Clinical Screens & Global Shell', ()
     it('M5.1.7: Empirically audits SettingsScreen.tsx line 278 status indicator dot', () => {
       const settingsPath = path.resolve(screensDir, 'SettingsScreen.tsx');
       const raw = fs.readFileSync(settingsPath, 'utf8');
-      const hasEmeraldDot = raw.includes('bg-emerald-400');
-      // Empirical Challenger finding verification:
-      // SettingsScreen.tsx line 278 uses `bg-emerald-400` for Service Online health indicator dot.
-      // We empirically verify this exact token presence and record it in our findings ledger.
-      assert.equal(
-        hasEmeraldDot,
-        true,
-        'SettingsScreen line 278 contains bg-emerald-400 status dot (Empirical defect gap recorded)'
+      const lines = raw.split(/\r?\n/);
+      const line278 = lines[277] || '';
+      assert.ok(!raw.includes('bg-emerald-400'), 'SettingsScreen.tsx must not contain bg-emerald-400');
+      assert.ok(raw.includes('bg-zinc-100'), 'SettingsScreen.tsx must contain bg-zinc-100');
+      assert.ok(
+        line278.includes('bg-zinc-100'),
+        `Line 278 of SettingsScreen.tsx must contain bg-zinc-100, got: "${line278.trim()}"`
+      );
+      assert.ok(
+        !line278.includes('bg-emerald-400'),
+        `Line 278 of SettingsScreen.tsx must not contain bg-emerald-400, got: "${line278.trim()}"`
       );
     });
 

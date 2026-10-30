@@ -51,7 +51,7 @@
 | M2 | Global Shell & Common Components | Sidebar navigation, topbar with breadcrumbs & case selector, reviewbar, modals, toast system, responsive shell | M1 | DONE |
 | M3 | Workspace Screens: Clinical Management & Reasoning | Overview, Cases, Case Detail, Clinical Reasoning, EHR Summary, Document Extraction, Medical Q&A, Chat, Library, Settings, Landing, Sign-in | M1, M2 | DONE |
 | M4 | Medical Imaging & Longitudinal Workspace | ImagingScreen, CompareScreen, ReportScreen, Cornerstone3D viewports (`ChestXrayViewport`, `LongitudinalXrayWorkspace`), TipTap editor | M1, M2 | DONE |
-| M5 | Final Integration & E2E Validation | Full build & lint pass, 100% pass of E2E Test Suite (Tiers 1-4), Tier 5 Adversarial Coverage Hardening | M3, M4, TEST_READY.md | IN_PROGRESS |
+| M5 | Final Integration & E2E Validation | Full build & lint pass, 100% pass of E2E Test Suite (Tiers 1-4), Tier 5 Adversarial Coverage Hardening | M3, M4, TEST_READY.md | DONE |
 
 ## Interface Contracts
 ### Shell ↔ Screen Contract
