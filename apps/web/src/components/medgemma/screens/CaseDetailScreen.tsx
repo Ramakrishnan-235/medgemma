@@ -55,7 +55,11 @@ export function CaseDetailScreen() {
 
   const handleOpenSource = (source: ApiSourceFile) => {
     setActiveSourceId(source.id);
-    if (source.file_kind === "dicom" || source.file_kind === "image_png" || source.file_kind === "image_jpeg") {
+    if (
+      source.file_kind === "dicom" ||
+      source.file_kind === "image_png" ||
+      source.file_kind === "image_jpeg"
+    ) {
       showToast(`Selected imaging study: ${source.filename}`);
       setPage("imaging");
     } else {
@@ -67,7 +71,7 @@ export function CaseDetailScreen() {
   return (
     <>
       <Heading
-        eyebrow={`CASE ID: ${activeCaseId ? activeCaseId.slice(0, 8) : "024"}`}
+        eyebrow={`CASE ID: ${activeCaseId ? (activeCaseId.length > 8 ? activeCaseId.slice(0, 8) : activeCaseId) : "024"}`}
         title={activeCase || "Chest follow-up"}
         desc="A connected view of this case, from source to draft."
         actions={
@@ -106,6 +110,33 @@ export function CaseDetailScreen() {
           text={caseDetail?.status || "Needs review"}
           variant={caseDetail?.status === "Reviewed" ? "soft" : "dark"}
         />
+      </div>
+
+      {/* 6-tile Patient Vitals Banner */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 mb-5">
+        {[
+          { label: "Heart Rate", val: "72", unit: "bpm", note: "Sinus rhythm" },
+          { label: "Blood Pressure", val: "128/82", unit: "mmHg", note: "Sitting, R" },
+          { label: "SpO2", val: "97%", unit: "O2", note: "Room air" },
+          { label: "Resp Rate", val: "16", unit: "/min", note: "Unlabored" },
+          { label: "Temperature", val: "36.8°", unit: "C", note: "Oral" },
+          { label: "Acuity Status", val: "Stable", unit: "", isBadge: true },
+        ].map((v) => (
+          <div key={v.label} className="panel p-3 text-left">
+            <span className="eyebrow block text-[10px] text-zinc-400 mb-1">{v.label}</span>
+            {v.isBadge ? (
+              <div className="mt-1">
+                <Badge text={v.val} variant="soft" />
+              </div>
+            ) : (
+              <div className="flex items-baseline gap-1">
+                <strong className="text-base font-semibold text-zinc-100">{v.val}</strong>
+                <small className="text-[10px] text-zinc-400">{v.unit}</small>
+              </div>
+            )}
+            {v.note && <small className="block text-[10px] text-zinc-500 mt-0.5">{v.note}</small>}
+          </div>
+        ))}
       </div>
 
       <div className="cols">
@@ -197,7 +228,7 @@ export function CaseDetailScreen() {
           <section className="panel">
             <div className="panel-head">
               <h2>Case outputs</h2>
-              <Badge text="2 drafts" />
+              <Badge text="2 drafts" variant="soft" />
             </div>
             <div className="panel-pad">
               <div className="listitem">

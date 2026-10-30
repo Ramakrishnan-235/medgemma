@@ -271,8 +271,8 @@ export function ImagingScreen() {
             <strong>Active Annotations ({annotations.length})</strong>
             <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px" }}>
               {annotations.map((ann) => (
-                <div key={ann.id} className="row between" style={{ fontSize: "11px", padding: "4px 8px", background: "#f4f4f5", borderRadius: "4px" }}>
-                  <span>{ann.anatomical_label}</span>
+                <div key={ann.id} className="row between" style={{ fontSize: "11px", padding: "4px 8px", background: "var(--soft)", border: "1px solid var(--line)", borderRadius: "4px" }}>
+                  <span className="text-zinc-100">{ann.anatomical_label}</span>
                   <Badge text={ann.origin} variant={ann.origin === "model_medgemma" ? "soft" : "dash"} />
                 </div>
               ))}

@@ -9,6 +9,7 @@ import { Topbar } from "@/components/medgemma/Topbar";
 import { Footnote } from "@/components/medgemma/CommonUI";
 import { ModalRoot } from "@/components/medgemma/ModalRoot";
 import { Toast } from "@/components/medgemma/Toast";
+import { MobileNavBar } from "@/components/medgemma/MobileNavBar";
 import type { PageId } from "@/types/workspace";
 
 // 15 Modular Screen Components
@@ -54,7 +55,7 @@ export default function MedGemmaWorkspaceApp() {
   const isStandalone = ["landing", "signin"].includes(page);
 
   return (
-    <div className="min-h-screen bg-[#fafaf9] text-[#18181b]">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Fixed Review Bar to preview/switch between all 15 screens */}
       <ReviewBar />
 
@@ -66,11 +67,12 @@ export default function MedGemmaWorkspaceApp() {
           <Sidebar />
           <main className="main">
             <Topbar />
-            <div className="content">
+            <div className="content max-[850px]:pb-20">
               <Screen />
               <Footnote />
             </div>
           </main>
+          <MobileNavBar />
         </div>
       )}
 

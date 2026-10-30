@@ -1,14 +1,21 @@
 "use client";
 
 import { useShallow } from "zustand/react/shallow";
-
 import React, { useState } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, Badge } from "../CommonUI";
 import { Icon } from "../Icons";
 
 export function ExtractionScreen() {
-  const { extractionField, setExtractionField, extractedFields, updateExtractedField, openModal, showToast } = useWorkspaceStore(
+  const {
+    extractionField,
+    setExtractionField,
+    extractedFields,
+    updateExtractedField,
+    openModal,
+    showToast,
+    activeCase,
+  } = useWorkspaceStore(
     useShallow((state) => ({
       extractionField: state.extractionField,
       setExtractionField: state.setExtractionField,
@@ -16,7 +23,8 @@ export function ExtractionScreen() {
       updateExtractedField: state.updateExtractedField,
       openModal: state.openModal,
       showToast: state.showToast,
-    })),
+      activeCase: state.activeCase,
+    }))
   );
 
   const [verifiedChecked, setVerifiedChecked] = useState(false);
@@ -24,6 +32,7 @@ export function ExtractionScreen() {
   const handleExport = () => {
     const data = {
       demo: true,
+      case_context: activeCase,
       review_status: verifiedChecked ? "reviewed" : "unreviewed",
       source: "fictional-lab-report",
       fields: Object.fromEntries(
@@ -78,11 +87,11 @@ export function ExtractionScreen() {
           </p>
           <small>1 page · 4 fields extracted · Review pending</small>
         </div>
-        <span className="small muted">Case 024</span>
+        <span className="small muted">{activeCase || "Case 024"}</span>
       </div>
 
       <div className="cols equal">
-        {/* Left Column: Visual Source Document Paper with Highlights */}
+        {/* Left Column: Visual Source Document Paper with Highlights & Reticle Locators */}
         <section className="panel">
           <div className="panel-head">
             <h2>Source document</h2>
@@ -90,13 +99,10 @@ export function ExtractionScreen() {
           </div>
           <div className="document">
             <div className="paper">
-              <p
-                className="eyebrow"
-                style={{ fontFamily: "Arial, sans-serif", margin: 0 }}
-              >
+              <p className="eyebrow font-sans m-0">
                 DEMONSTRATION LABORATORY
               </p>
-              <h3 style={{ marginTop: "20px", fontSize: "20px" }}>
+              <h3 className="mt-5 text-[20px] font-semibold">
                 Laboratory report
               </h3>
               <p>Fictional source · Interface sample</p>
@@ -108,8 +114,16 @@ export function ExtractionScreen() {
                 Collected &nbsp;{" "}
                 <mark
                   data-field-mark="date"
-                  className={extractionField === "date" ? "highlight" : ""}
+                  role="button"
+                  tabIndex={0}
+                  className={`cursor-pointer transition-colors duration-150 inline-flex items-center gap-1 ${
+                    extractionField === "date" ? "highlight ring-1 ring-zinc-300" : ""
+                  }`}
+                  onClick={() => setExtractionField("date")}
+                  onKeyDown={(e) => e.key === "Enter" && setExtractionField("date")}
+                  title="Click to select Collection date"
                 >
+                  {extractionField === "date" && <span className="text-[9px] opacity-75 font-mono">⌖</span>}
                   22 Oct 2026
                 </mark>
               </div>
@@ -117,8 +131,16 @@ export function ExtractionScreen() {
                 Specimen &nbsp;{" "}
                 <mark
                   data-field-mark="specimen"
-                  className={extractionField === "specimen" ? "highlight" : ""}
+                  role="button"
+                  tabIndex={0}
+                  className={`cursor-pointer transition-colors duration-150 inline-flex items-center gap-1 ${
+                    extractionField === "specimen" ? "highlight ring-1 ring-zinc-300" : ""
+                  }`}
+                  onClick={() => setExtractionField("specimen")}
+                  onKeyDown={(e) => e.key === "Enter" && setExtractionField("specimen")}
+                  title="Click to select Specimen"
                 >
+                  {extractionField === "specimen" && <span className="text-[9px] opacity-75 font-mono">⌖</span>}
                   Whole blood
                 </mark>
               </div>
@@ -129,10 +151,16 @@ export function ExtractionScreen() {
                 Hemoglobin &nbsp;{" "}
                 <mark
                   data-field-mark="hemoglobin"
-                  className={
-                    extractionField === "hemoglobin" ? "highlight" : ""
-                  }
+                  role="button"
+                  tabIndex={0}
+                  className={`cursor-pointer transition-colors duration-150 inline-flex items-center gap-1 ${
+                    extractionField === "hemoglobin" ? "highlight ring-1 ring-zinc-300" : ""
+                  }`}
+                  onClick={() => setExtractionField("hemoglobin")}
+                  onKeyDown={(e) => e.key === "Enter" && setExtractionField("hemoglobin")}
+                  title="Click to select Hemoglobin"
                 >
+                  {extractionField === "hemoglobin" && <span className="text-[9px] opacity-75 font-mono">⌖</span>}
                   13.2 g/dL
                 </mark>
               </div>
@@ -140,13 +168,21 @@ export function ExtractionScreen() {
                 White blood cells &nbsp;{" "}
                 <mark
                   data-field-mark="wbc"
-                  className={extractionField === "wbc" ? "highlight" : ""}
+                  role="button"
+                  tabIndex={0}
+                  className={`cursor-pointer transition-colors duration-150 inline-flex items-center gap-1 ${
+                    extractionField === "wbc" ? "highlight ring-1 ring-zinc-300" : ""
+                  }`}
+                  onClick={() => setExtractionField("wbc")}
+                  onKeyDown={(e) => e.key === "Enter" && setExtractionField("wbc")}
+                  title="Click to select White blood cells"
                 >
+                  {extractionField === "wbc" && <span className="text-[9px] opacity-75 font-mono">⌖</span>}
                   6.4 ×10⁹/L
                 </mark>
               </div>
 
-              <p style={{ marginTop: "45px", color: "#777" }}>
+              <p className="text-zinc-500 text-[11px] leading-relaxed mt-11">
                 Illustrative values only.
                 <br />
                 No real patient information.
@@ -161,7 +197,7 @@ export function ExtractionScreen() {
             <h2>Extracted fields</h2>
             <Badge text="4 fields" variant="soft" />
           </div>
-          <p className="muted small" style={{ margin: "10px 0 14px" }}>
+          <p className="muted small my-2.5 mb-3.5">
             Select a source link to locate the original value.
           </p>
 
@@ -200,7 +236,7 @@ export function ExtractionScreen() {
             </label>
           </div>
 
-          <div className="row" style={{ marginTop: "20px" }}>
+          <div className="row mt-5">
             <button
               type="button"
               className="btn black"
@@ -212,7 +248,7 @@ export function ExtractionScreen() {
             </button>
           </div>
 
-          <div className="note" style={{ marginTop: "24px" }}>
+          <div className="note mt-6">
             Extraction outputs remain editable. A field should retain its source
             location and review status after correction.
           </div>

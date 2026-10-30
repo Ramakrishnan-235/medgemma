@@ -6,9 +6,11 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "type-check": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "start": "next start",
     "server": "node server.js",
-    "postinstall": "node scripts/copy-cornerstone-wasm.mjs"
+    "postinstall": "node scripts/copy-cornerstone-wasm.mjs",
+    "test:e2e": "node scripts/e2e-test.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

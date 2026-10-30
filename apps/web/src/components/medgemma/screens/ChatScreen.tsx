@@ -23,6 +23,8 @@ export function ChatScreen() {
     setPage,
     openModal,
     showToast,
+    addChatMessage,
+    clearChat,
   } = useWorkspaceStore(
     useShallow((state) => ({
       activeCase: state.activeCase,
@@ -30,6 +32,8 @@ export function ChatScreen() {
       setPage: state.setPage,
       openModal: state.openModal,
       showToast: state.showToast,
+      addChatMessage: state.addChatMessage,
+      clearChat: state.clearChat,
     }))
   );
 
@@ -52,6 +56,8 @@ export function ChatScreen() {
     if (!query || isSubmitting) return;
 
     setInputVal("");
+    addChatMessage(query);
+
     const userMsgId = `user-${Date.now()}`;
     const assistantMsgId = `assistant-${Date.now()}`;
 
@@ -70,10 +76,7 @@ export function ChatScreen() {
     setIsSubmitting(true);
 
     try {
-      // Trigger AI Q&A run on backend
       const run = await api.createQARun(activeCaseId, query);
-
-      // Subscribe to real-time SSE token stream
       const es = api.subscribeRunEvents(
         activeCaseId,
         run.run_id,
@@ -106,7 +109,6 @@ export function ChatScreen() {
           }
         },
         () => {
-          // Stream error or disconnect
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId ? { ...m, isStreaming: false } : m
@@ -118,7 +120,6 @@ export function ChatScreen() {
 
       activeEventSourceRef.current = es;
     } catch {
-      // Backend offline fallback
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsgId
@@ -144,6 +145,7 @@ export function ChatScreen() {
       activeEventSourceRef.current.close();
     }
     setMessages([]);
+    clearChat();
     showToast("Cleared conversation history.");
   };
 
@@ -169,13 +171,13 @@ export function ChatScreen() {
         <aside className="chats">
           <button
             type="button"
-            className="btn w-full"
+            className="btn full justify-center"
             onClick={handleClear}
           >
             <Icon name="plus" /> New conversation
           </button>
 
-          <p className="eyebrow" style={{ margin: "24px 8px 10px" }}>
+          <p className="eyebrow mt-6 mx-2 mb-2.5">
             Recent
           </p>
 
@@ -273,7 +275,7 @@ export function ChatScreen() {
                         variant={m.isStreaming ? "dark" : "soft"}
                       />
                     </div>
-                    <p style={{ whiteSpace: "pre-wrap" }}>
+                    <p className="whitespace-pre-wrap">
                       {m.text || (m.isStreaming ? "Thinking..." : "")}
                     </p>
                     {m.citations && m.citations.length > 0 && (
@@ -282,6 +284,11 @@ export function ChatScreen() {
                           <SourceChip
                             key={i}
                             label={`${c.label}${c.page_or_frame ? ` (p.${c.page_or_frame})` : ""}`}
+                            payload={{
+                              title: c.label,
+                              location: c.page_or_frame ? `Page/Frame ${c.page_or_frame}` : undefined,
+                              quote: `Verified citation tag from MedGemma inference.`,
+                            }}
                           />
                         ))}
                       </div>

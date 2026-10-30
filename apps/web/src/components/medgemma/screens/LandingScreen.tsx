@@ -21,6 +21,7 @@ export function LandingScreen() {
           onClick={() => setPage("landing")}
           className="brand text-left cursor-pointer"
           style={{ background: "none", border: 0, padding: 0 }}
+          aria-label="MedGemma Home"
         >
           <span className="brandmark">+</span>
           MedGemma
@@ -102,7 +103,7 @@ export function LandingScreen() {
           </div>
           <div className="preview-body">
             <aside className="preview-nav">
-              <b style={{ color: "#18181b" }}>◫ Overview</b>
+              <b style={{ color: "var(--ink)" }}>◫ Overview</b>
               <br />
               ▱ Cases
               <br />
@@ -137,7 +138,7 @@ export function LandingScreen() {
                 style={{
                   fontSize: "10px",
                   padding: "10px 0",
-                  borderTop: "1px solid #eee",
+                  borderTop: "1px solid var(--line)",
                 }}
               >
                 <b>Chest follow-up</b>
@@ -148,7 +149,7 @@ export function LandingScreen() {
                 style={{
                   fontSize: "10px",
                   padding: "10px 0",
-                  borderTop: "1px solid #eee",
+                  borderTop: "1px solid var(--line)",
                 }}
               >
                 <b>Record synthesis</b>
@@ -204,6 +205,7 @@ export function LandingScreen() {
                 textAlign: "left",
               }}
               onClick={() => setPage(item.target)}
+              aria-label={`Navigate to ${item.title}`}
             >
               <h3>{item.title}</h3>
             </button>
@@ -216,7 +218,7 @@ export function LandingScreen() {
       <section
         id="workflow"
         className="marketing-section"
-        style={{ borderTop: "1px solid #eee" }}
+        style={{ borderTop: "1px solid var(--line)" }}
       >
         <div className="section-title">
           <h2>

@@ -149,10 +149,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       ),
     })),
 
-  addChatMessage: (msg) =>
+  addChatMessage: (msg) => {
+    if (!msg || !msg.trim()) return;
     set((state) => ({
-      chatMessages: [...state.chatMessages, msg],
-    })),
+      chatMessages: [...state.chatMessages, msg.trim()],
+    }));
+  },
 
   clearChat: () => set({ chatMessages: [] }),
   setQaAnswer: (val) => set({ qaAnswer: val }),

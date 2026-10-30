@@ -19,6 +19,7 @@ export function LibraryScreen() {
     activeCaseId,
     activeCase,
     setActiveSourceId,
+    showToast,
   } = useWorkspaceStore(
     useShallow((state) => ({
       libraryType: state.libraryType,
@@ -30,6 +31,7 @@ export function LibraryScreen() {
       activeCaseId: state.activeCaseId,
       activeCase: state.activeCase,
       setActiveSourceId: state.setActiveSourceId,
+      showToast: state.showToast,
     }))
   );
 
@@ -81,6 +83,14 @@ export function LibraryScreen() {
     return matchesCategory && matchesSearch;
   });
 
+  const handleOpenItem = (item: LibraryItem) => {
+    if (item.category === "Imaging") {
+      setActiveSourceId(null);
+    }
+    showToast(`Opened ${item.name} in ${item.category}`);
+    setPage(item.page);
+  };
+
   return (
     <>
       <Heading
@@ -100,17 +110,27 @@ export function LibraryScreen() {
 
       {/* Tabs and Search Toolbar */}
       <div className="toolbar">
-        <div className="tabs" aria-label="Library filter tabs">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={libraryType === t ? "selected" : ""}
-              onClick={() => setLibraryType(t)}
-            >
-              {t}
-            </button>
-          ))}
+        <div className="tabs" aria-label="Library filter tabs" role="tablist">
+          {tabs.map((t) => {
+            const count =
+              t === "All files"
+                ? allItems.length
+                : allItems.filter((f) => f.category === t).length;
+            const isSelected = libraryType === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                className={isSelected ? "selected" : ""}
+                onClick={() => setLibraryType(t)}
+              >
+                {t}
+                <span className="opacity-60 text-[9px] ml-1">({count})</span>
+              </button>
+            );
+          })}
         </div>
 
         <label className="search">
@@ -144,13 +164,8 @@ export function LibraryScreen() {
                 filtered.map((item, idx) => (
                   <tr
                     key={`${item.name}-${idx}`}
-                    onClick={() => {
-                      if (item.category === "Imaging") {
-                        setActiveSourceId(null);
-                      }
-                      setPage(item.page);
-                    }}
-                    style={{ cursor: "pointer" }}
+                    onClick={() => handleOpenItem(item)}
+                    className="cursor-pointer hover:bg-zinc-800/40 transition-colors"
                   >
                     <td>
                       <span className="fileicon">
@@ -162,7 +177,16 @@ export function LibraryScreen() {
                     <td>{item.caseContext}</td>
                     <td className="muted">{item.date}</td>
                     <td>
-                      <Badge text={item.status} />
+                      <Badge
+                        text={item.status}
+                        variant={
+                          item.status === "Needs review"
+                            ? "dark"
+                            : item.status === "Verified" || item.status === "Draft"
+                            ? "soft"
+                            : "dash"
+                        }
+                      />
                     </td>
                     <td>
                       <button
@@ -170,7 +194,7 @@ export function LibraryScreen() {
                         className="btn tiny ghost"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setPage(item.page);
+                          handleOpenItem(item);
                         }}
                         aria-label={`Open ${item.name}`}
                       >
@@ -181,7 +205,7 @@ export function LibraryScreen() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="text-center py-6 text-neutral-500">
+                  <td colSpan={6} className="text-center py-6 text-zinc-400">
                     No matching files found.
                   </td>
                 </tr>

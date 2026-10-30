@@ -14,12 +14,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <body
-        className="font-sans antialiased bg-[#fafaf9] text-[#18181b] min-h-screen"
+        className="font-sans antialiased bg-background text-foreground min-h-screen"
         style={{
           fontFamily:
-            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+            "'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
         }}
       >
         <QueryProvider>{children}</QueryProvider>

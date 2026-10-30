@@ -1,19 +1,20 @@
 "use client";
 
 import { useShallow } from "zustand/react/shallow";
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Heading, ContextBar, Badge, SourceChip } from "../CommonUI";
 import { Icon } from "../Icons";
 import { api } from "@/lib/api";
 
 export function ReasoningScreen() {
-  const { setPage, openModal, showToast, activeCaseId } = useWorkspaceStore(
+  const { setPage, openModal, showToast, activeCaseId, activeCase } = useWorkspaceStore(
     useShallow((state) => ({
       setPage: state.setPage,
       openModal: state.openModal,
       showToast: state.showToast,
       activeCaseId: state.activeCaseId,
+      activeCase: state.activeCase,
     }))
   );
   const [question, setQuestion] = useState(
@@ -21,15 +22,28 @@ export function ReasoningScreen() {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [liveResult, setLiveResult] = useState<string | null>(null);
+  const activeEventSourceRef = useRef<EventSource | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeEventSourceRef.current) {
+        activeEventSourceRef.current.close();
+      }
+    };
+  }, []);
 
   const handleExplore = async () => {
     if (!question.trim()) return;
+    if (activeEventSourceRef.current) {
+      activeEventSourceRef.current.close();
+    }
+
     setIsLoading(true);
     setLiveResult("");
 
     try {
       const run = await api.createQARun(activeCaseId, question);
-      api.subscribeRunEvents(
+      const es = api.subscribeRunEvents(
         activeCaseId,
         run.run_id,
         (event, data) => {
@@ -49,6 +63,7 @@ export function ReasoningScreen() {
           setIsLoading(false);
         }
       );
+      activeEventSourceRef.current = es;
     } catch {
       setIsLoading(false);
       showToast("Evidence layout shown below (Backend offline fallback).");
@@ -97,7 +112,7 @@ export function ReasoningScreen() {
               <span className="small">Clinical note.pdf</span>
               <Badge text="Source material" />
             </div>
-            <div className="document" style={{ marginTop: "18px" }}>
+            <div className="document mt-[18px]">
               <div className="paper">
                 <h3>Clinical encounter note</h3>
                 <p>PATIENT RECORD · CASE EVIDENCE</p>
@@ -105,7 +120,7 @@ export function ReasoningScreen() {
                 <p>
                   <b>Context</b>
                   <br />
-                  The record describes a follow-up visit and an imaging study. A
+                  The record describes a follow-up visit and an imaging study for {activeCase || "Case 024"}. A
                   prior study is available for comparison.
                 </p>
                 <p>
@@ -150,15 +165,24 @@ export function ReasoningScreen() {
 
           <div id="reasoning-result">
             {liveResult !== null && (
-              <div className="insight" style={{ borderColor: "#10b981", borderWidth: 2 }}>
-                <h3>
+              <div className="insight border-l-2 border-zinc-400 pl-3.5 my-3 bg-zinc-950/40 rounded-r-md py-3">
+                <h3 className="flex items-center gap-2">
                   Live MedGemma Synthesis{" "}
                   <Badge text={isLoading ? "Streaming" : "Verified"} variant="dark" />
                 </h3>
-                <p style={{ whiteSpace: "pre-wrap" }}>
+                <p className="whitespace-pre-wrap mt-2 text-zinc-200">
                   {liveResult || (isLoading ? "Querying hybrid RRF and reasoning..." : "")}
                 </p>
-                <SourceChip label="Active Case Evidence Vector" />
+                <div className="mt-3">
+                  <SourceChip
+                    label="Active Case Evidence Vector"
+                    payload={{
+                      title: "Live Evidence Synthesis",
+                      quote: liveResult || "Streaming real-time token inference from MedGemma.",
+                      location: "PostgreSQL pgvector / HNSW hybrid search",
+                    }}
+                  />
+                </div>
               </div>
             )}
 
@@ -172,7 +196,14 @@ export function ReasoningScreen() {
                 imaging. Verify the dates, clinical indication and acquisition
                 context before drafting the case summary.
               </p>
-              <SourceChip label="Clinical note · Context" />
+              <SourceChip
+                label="Clinical note · Context"
+                payload={{
+                  title: "Clinical note · Context",
+                  quote: "Follow-up visit and imaging study documentation. Prior comparison available.",
+                  location: "Clinical note.pdf · Section 1",
+                }}
+              />
             </div>
 
             <div className="insight">
@@ -182,7 +213,14 @@ export function ReasoningScreen() {
                 <li>Comparison study metadata and availability</li>
                 <li>Source findings and review status</li>
               </ul>
-              <SourceChip label="Clinical note · Limitations" />
+              <SourceChip
+                label="Clinical note · Limitations"
+                payload={{
+                  title: "Clinical note · Limitations",
+                  quote: "Patient history and complete examination details are absent from the admission intake note.",
+                  location: "Clinical note.pdf · Limitations clause",
+                }}
+              />
             </div>
 
             <div className="insight">

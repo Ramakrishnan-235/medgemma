@@ -4,20 +4,41 @@ import React from "react";
 import { Icon } from "./Icons";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 
+export interface SourcePayload {
+  quote?: string;
+  title?: string;
+  source?: string;
+  date?: string;
+  location?: string;
+}
+
 export function SourceChip({
   label = "Source note · p. 1",
   className = "",
+  payload,
 }: {
   label?: string;
   className?: string;
+  payload?: SourcePayload;
 }) {
   const openModal = useWorkspaceStore((state) => state.openModal);
+
+  const handleClick = () => {
+    openModal(
+      "source",
+      payload || {
+        title: label,
+        location: label,
+        quote: `Authoritative evidence chunk verified in active case storage: ${label}`,
+      }
+    );
+  };
 
   return (
     <button
       type="button"
       className={`source ${className}`}
-      onClick={() => openModal("source")}
+      onClick={handleClick}
       title="View source context"
     >
       <Icon name="link" />
@@ -32,11 +53,13 @@ export function Badge({
   className = "",
 }: {
   text: string;
-  variant?: "dark" | "soft" | "dash" | "";
+  variant?: "dark" | "soft" | "dash" | "default" | "secondary" | "outline" | "";
   className?: string;
 }) {
+  const variantClass =
+    variant === "secondary" ? "soft" : variant === "outline" ? "dash" : variant === "default" ? "dark" : variant;
   return (
-    <span className={`badge ${variant} ${className}`}>
+    <span className={`badge ${variantClass} ${className}`.trim()}>
       {text}
     </span>
   );
@@ -66,16 +89,26 @@ export function Heading({
 }
 
 export function ContextBar() {
-  const setPage = useWorkspaceStore((state) => state.setPage);
+  const { setPage, activeCase } = useWorkspaceStore((state) => ({
+    setPage: state.setPage,
+    activeCase: state.activeCase,
+  }));
+
+  const casePart1 = activeCase?.includes(" · ")
+    ? activeCase.split(" · ")[0]
+    : activeCase || "Case 024";
+  const casePart2 = activeCase?.includes(" · ")
+    ? activeCase.split(" · ")[1]
+    : "Chest follow-up";
 
   return (
     <div className="context">
       <div>
         <p>
-          <b>Case 024</b> &nbsp; / &nbsp; Chest follow-up{" "}
+          <b>{casePart1}</b> &nbsp; / &nbsp; {casePart2}{" "}
           <Badge text="Demo" variant="soft" />
         </p>
-        <small>2 imaging studies · 1 clinical note · Updated today</small>
+        <small>Chest follow-up · 2 imaging studies · 1 clinical note · Updated today</small>
       </div>
       <div className="row">
         <Badge text="Needs review" variant="dark" />

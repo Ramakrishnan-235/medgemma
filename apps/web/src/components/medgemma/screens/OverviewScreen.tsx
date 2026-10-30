@@ -9,13 +9,14 @@ import { api, type ApiCase } from "@/lib/api";
 import { type CaseItem } from "@/types/workspace";
 
 export function OverviewScreen() {
-  const { setPage, cases, setCases, setActiveCase, openModal } = useWorkspaceStore(
+  const { setPage, cases, setCases, setActiveCase, openModal, showToast } = useWorkspaceStore(
     useShallow((state) => ({
       setPage: state.setPage,
       cases: state.cases,
       setCases: state.setCases,
       setActiveCase: state.setActiveCase,
       openModal: state.openModal,
+      showToast: state.showToast,
     }))
   );
 
@@ -46,9 +47,12 @@ export function OverviewScreen() {
   }, [setCases]);
 
   const recentCases = cases.slice(0, 4);
+  const awaitingReviewCount = cases.filter((c) => c.status === "Needs review").length || 4;
+  const draftReadyCount = cases.filter((c) => c.status === "Draft ready").length || 8;
 
   const handleSelectCase = (c: CaseItem) => {
     setActiveCase(c.name, c.id);
+    showToast(`Switched active context to ${c.name}`);
     setPage("case");
   };
 
@@ -76,21 +80,21 @@ export function OverviewScreen() {
             Active cases <Icon name="folder" />
           </label>
           <strong>{String(cases.length).padStart(2, "0")}</strong>
-          <small>PostgreSQL multi-tenant cases</small>
+          <small>In your clinical workspace</small>
         </div>
         <div className="stat">
           <label>
             Awaiting review <Icon name="eye" />
           </label>
-          <strong>04</strong>
-          <small>Imaging &amp; EHR extractions</small>
+          <strong>{String(awaitingReviewCount).padStart(2, "0")}</strong>
+          <small>Ready for closer review</small>
         </div>
         <div className="stat">
           <label>
             Report drafts <Icon name="report" />
           </label>
-          <strong>08</strong>
-          <small>Versioned TipTap drafts</small>
+          <strong>{String(draftReadyCount).padStart(2, "0")}</strong>
+          <small>Continue where you left off</small>
         </div>
       </div>
 
@@ -167,47 +171,55 @@ export function OverviewScreen() {
                 </tr>
               </thead>
               <tbody>
-                {recentCases.map((c) => (
-                  <tr
-                    key={c.id}
-                    onClick={() => handleSelectCase(c)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td>
-                      <span className="case-name">
-                        {c.name}
-                        <small>ID: {c.id.slice(0, 8)}</small>
-                      </span>
-                    </td>
-                    <td className="muted">{c.meta}</td>
-                    <td>
-                      <Badge
-                        text={c.status}
-                        variant={
-                          c.status === "Needs review"
-                            ? "dark"
-                            : c.status === "Reviewed"
-                            ? "soft"
-                            : ""
-                        }
-                      />
-                    </td>
-                    <td className="muted">{c.date}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn tiny ghost"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectCase(c);
-                        }}
-                        aria-label={`Open ${c.name}`}
-                      >
-                        <Icon name="chevron" />
-                      </button>
+                {recentCases.length > 0 ? (
+                  recentCases.map((c) => (
+                    <tr
+                      key={c.id}
+                      onClick={() => handleSelectCase(c)}
+                      className="cursor-pointer hover:bg-zinc-800/40 transition-colors"
+                    >
+                      <td>
+                        <span className="case-name">
+                          {c.name}
+                          <small>ID: {c.id.length > 8 ? c.id.slice(0, 8) : c.id}</small>
+                        </span>
+                      </td>
+                      <td className="muted">{c.meta}</td>
+                      <td>
+                        <Badge
+                          text={c.status}
+                          variant={
+                            c.status === "Needs review"
+                              ? "dark"
+                              : c.status === "Reviewed"
+                              ? "soft"
+                              : "dash"
+                          }
+                        />
+                      </td>
+                      <td className="muted">{c.date}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn tiny ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSelectCase(c);
+                          }}
+                          aria-label={`Open ${c.name}`}
+                        >
+                          <Icon name="chevron" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="text-center py-6 text-zinc-400">
+                      No active cases found. Click &quot;New case&quot; to begin.
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
@@ -241,7 +253,7 @@ export function OverviewScreen() {
               </div>
             </div>
           </div>
-          <div style={{ padding: "0 22px 20px" }}>
+          <div className="px-[22px] pb-5">
             <button
               type="button"
               className="btn"

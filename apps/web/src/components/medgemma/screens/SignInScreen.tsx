@@ -11,7 +11,7 @@ export function SignInScreen() {
     useShallow((state) => ({
       setPage: state.setPage,
       showToast: state.showToast,
-    })),
+    }))
   );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,43 +30,46 @@ export function SignInScreen() {
           onClick={() => setPage("landing")}
           className="brand text-left cursor-pointer"
           style={{ background: "none", border: 0, padding: 0 }}
+          aria-label="MedGemma Home"
         >
           <span className="brandmark">+</span>
           MedGemma
         </button>
 
         <span className="eyebrow">WELCOME BACK</span>
-        <h1 style={{ marginTop: "13px" }}>Your workspace awaits.</h1>
+        <h1 className="mt-3.5">Your workspace awaits.</h1>
         <p>Sign in to continue with your cases and drafts.</p>
 
-        <form onSubmit={handleSubmit}>
-          <label className="field">
+        <form onSubmit={handleSubmit} aria-label="Sign in to MedGemma Clinical Workspace">
+          <label className="field" htmlFor="signin-email">
             Email address
             <input
+              id="signin-email"
               type="email"
               placeholder="you@example.com"
-              autoComplete="off"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
           </label>
 
-          <label className="field">
+          <label className="field" htmlFor="signin-password">
             Password
             <input
+              id="signin-password"
               type="password"
               placeholder="Enter your password"
-              autoComplete="off"
+              autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </label>
 
-          <div className="row between" style={{ margin: "12px 0 23px" }}>
-            <label className="small muted flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" defaultChecked /> Remember me
+          <div className="row between my-3 mb-6">
+            <label className="small muted flex items-center gap-1.5 cursor-pointer" htmlFor="signin-remember">
+              <input id="signin-remember" type="checkbox" defaultChecked /> Remember me
             </label>
             <button
               type="button"
@@ -84,7 +87,7 @@ export function SignInScreen() {
           </button>
         </form>
 
-        <div style={{ textAlign: "center", marginTop: "20px" }}>
+        <div className="text-center mt-5">
           <button
             type="button"
             className="btn"
@@ -101,8 +104,7 @@ export function SignInScreen() {
 
       <aside className="authaside">
         <span
-          className="eyebrow"
-          style={{ color: "#99999f", marginBottom: "28px" }}
+          className="eyebrow mb-7 text-zinc-400"
         >
           CLARITY, BY DESIGN
         </span>
@@ -118,14 +120,7 @@ export function SignInScreen() {
           Connected by the case.
         </p>
         <div
-          style={{
-            borderTop: "1px solid #414145",
-            marginTop: "50px",
-            paddingTop: "20px",
-            maxWidth: "320px",
-            fontSize: "10px",
-            color: "#a5a5ad",
-          }}
+          className="mt-12 pt-5 max-w-[320px] text-[10px] text-zinc-400 border-t border-zinc-800"
         >
           MedGemma Workspace / Interface concept
         </div>

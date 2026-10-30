@@ -35,4 +35,7 @@ Thumbs.db
 
 apps/api/requirements.txt
 medgemma-ui-design.html
-apps/api/requirements.txt
+
+# Agent orchestration files
+.agents/
+
