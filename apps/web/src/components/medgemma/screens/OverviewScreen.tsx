@@ -47,8 +47,8 @@ export function OverviewScreen() {
   }, [setCases]);
 
   const recentCases = cases.slice(0, 4);
-  const awaitingReviewCount = cases.filter((c) => c.status === "Needs review").length || 4;
-  const draftReadyCount = cases.filter((c) => c.status === "Draft ready").length || 8;
+  const awaitingReviewCount = cases.length > 0 ? cases.filter((c) => c.status === "Needs review").length : 4;
+  const draftReadyCount = cases.length > 0 ? cases.filter((c) => c.status === "Draft ready").length : 8;
 
   const handleSelectCase = (c: CaseItem) => {
     setActiveCase(c.name, c.id);

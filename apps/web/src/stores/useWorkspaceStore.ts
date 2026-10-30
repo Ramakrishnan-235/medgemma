@@ -111,8 +111,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (!caseId) {
         const numericIds = state.cases
           .map((item) => {
-            const num = Number.parseInt(String(item.id).replace(/\D/g, ""), 10);
-            return Number.isFinite(num) ? num : 0;
+            const idStr = String(item.id);
+            if (idStr.length <= 4 && /^\d+$/.test(idStr)) {
+              const num = Number.parseInt(idStr, 10);
+              return Number.isFinite(num) ? num : 0;
+            }
+            return 0;
           })
           .filter((n) => !Number.isNaN(n));
         const maxId = numericIds.length > 0 ? Math.max(0, ...numericIds) : 0;

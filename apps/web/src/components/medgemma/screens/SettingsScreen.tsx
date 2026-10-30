@@ -275,7 +275,7 @@ export function SettingsScreen() {
                 <div className="note mt-3.5 bg-zinc-900 border-zinc-800 text-zinc-100">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span
-                      className="inline-block w-2 h-2 rounded-full bg-emerald-400"
+                      className="inline-block w-2 h-2 rounded-full bg-zinc-100"
                       aria-hidden="true"
                     />
                     <strong className="text-zinc-100">
