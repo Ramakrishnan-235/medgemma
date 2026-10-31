@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Icon } from "./Icons";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 
@@ -89,10 +90,12 @@ export function Heading({
 }
 
 export function ContextBar() {
-  const { setPage, activeCase } = useWorkspaceStore((state) => ({
-    setPage: state.setPage,
-    activeCase: state.activeCase,
-  }));
+  const { setPage, activeCase } = useWorkspaceStore(
+    useShallow((state) => ({
+      setPage: state.setPage,
+      activeCase: state.activeCase,
+    }))
+  );
 
   const casePart1 = activeCase?.includes(" · ")
     ? activeCase.split(" · ")[0]

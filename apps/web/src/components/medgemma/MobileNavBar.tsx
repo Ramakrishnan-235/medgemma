@@ -1,17 +1,20 @@
 "use client";
 
 import React, { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useWorkspaceStore } from "@/stores/useWorkspaceStore";
 import { Icon } from "./Icons";
 import { type PageId } from "@/types/workspace";
 
 export function MobileNavBar() {
-  const { page, setPage, cases, openModal } = useWorkspaceStore((state) => ({
-    page: state.page,
-    setPage: state.setPage,
-    cases: state.cases,
-    openModal: state.openModal,
-  }));
+  const { page, setPage, cases, openModal } = useWorkspaceStore(
+    useShallow((state) => ({
+      page: state.page,
+      setPage: state.setPage,
+      cases: state.cases,
+      openModal: state.openModal,
+    }))
+  );
 
   const [menuOpen, setMenuOpen] = useState(false);
 
