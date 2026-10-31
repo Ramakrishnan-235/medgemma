@@ -1,0 +1,7 @@
+﻿audited 634 packages in 10s
+
+634 packages have verified registry signatures
+
+209 packages have verified attestations
+(use --json --include-attestations to view attestation details)
+
