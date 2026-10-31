@@ -14,12 +14,28 @@
 
 Every change must pass these automated quality gates before merge:
 
-- [ ] **Type Check:** `npm run type-check` passes with zero errors (frontend).
-- [ ] **Lint / Syntax:** Python syntax compilation (`python -m compileall`) passes without errors.
-- [ ] **Automated Tests:** `python -m unittest discover -s tests` passes (all regression and unit tests green).
-- [ ] **Build:** Production builds succeed (`npm run build` in `apps/web`).
-- [ ] **Security & Multi-Tenant:** All queries enforce `workspace_id` compound boundaries; no secret leakage.
-- [ ] **Docker Containers:** Dockerfiles build cleanly; compose config passes validation.
+- [ ] **Frontend Quality & Verification (`frontend-quality`):**
+  - Strict type checking (`npm run type-check`) & lint (`npm run lint`).
+  - Cornerstone3D WASM codecs staged & verified.
+  - Complete 162-test E2E suite passes (`npm run test:e2e`).
+  - Production build succeeds (`npm run build`).
+  - Security audit passes (`npm audit --audit-level=critical`).
+
+- [ ] **Backend Unit Tests & Static Analysis (`backend-unit`):**
+  - Python bytecode & syntax compilation passes (`compileall`).
+  - Ruff code formatting & linter passes (`ruff check`).
+  - Mypy static typecheck passes (`mypy`).
+  - All 91 unit & defensive security posture tests pass (`pytest tests/`).
+
+- [ ] **Backend Integration & Acceptance (`backend-integration`):**
+  - PostgreSQL 16 (pgvector + pgcrypto) & Redis 7 services healthy.
+  - Reversible Alembic migrations pass (`upgrade head` -> `downgrade base` -> `upgrade head`).
+  - HNSW vector index & tsvector GIN index verified.
+  - Full hybrid RRF retrieval & acceptance tests pass (`pytest apps/api/tests/`).
+
+- [ ] **Container & Environment Verification (`container-verification`):**
+  - Docker Compose configuration validated against `.env.test`.
+  - Web & API Docker production containers build cleanly.
 
 ---
 

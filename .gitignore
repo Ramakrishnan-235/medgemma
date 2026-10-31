@@ -33,7 +33,6 @@ Thumbs.db
 .idea/
 .vscode/
 
-apps/api/requirements.txt
 medgemma-ui-design.html
 
 # Agent orchestration files
