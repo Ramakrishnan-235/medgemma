@@ -368,7 +368,7 @@ async def get_free_form_radiology_report(
     return generate_narrative_radiology_report(
         case_id=case_id,
         lesion_data={
-            "peak_slice": payload["primary_roi"]["location"],
+            "peak_slice": payload["active_slice"],
             "dimensions_str": payload["primary_roi"]["dimensions_str"],
             "volume_cm3": payload["primary_roi"]["volume_cm3"],
             "mean_hu": payload["primary_roi"]["mean_hu"],
@@ -455,7 +455,7 @@ async def query_targeted_slice_vqa(
     payload: TargetedSliceVQARequest | None = None,
     case_id: str = Query("CASE-2026-0894"),
     slice_index: int = Query(64, ge=1, le=512),
-    tissue_window: Literal["soft_tissue", "lung", "bone", "liver", "mediastinum"] = Query("soft_tissue"),
+    tissue_window: str = Query("soft_tissue", description="Tissue window or sequence preset"),
     question: str = Query("Describe the lesion on slice 64"),
 ) -> TargetedSliceVQAResponse:
     """Answers clinical natural language visual question answering for a specific axial slice."""

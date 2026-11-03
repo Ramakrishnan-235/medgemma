@@ -101,6 +101,14 @@ def test_targeted_slice_vqa_schema():
     assert req.slice_index == 64
     assert req.tissue_window == "soft_tissue"
 
+    req_mri = TargetedSliceVQARequest(
+        case_id="CASE-2026-0894",
+        slice_index=64,
+        tissue_window="t2_weighted",
+        question="Describe the lesion on slice 64",
+    )
+    assert req_mri.tissue_window == "t2_weighted"
+
     resp = TargetedSliceVQAResponse(
         slice_index=64,
         question="Describe the lesion on slice 64",

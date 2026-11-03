@@ -76,3 +76,25 @@ def test_generate_longitudinal_comparison_stable():
     assert comparison.recist_category == "Stable Disease"
     assert comparison.interval_days == 95
 
+
+def test_generate_longitudinal_comparison_custom_date_format():
+    prior_scan = {
+        "study_date": "2026/01/15",
+        "lesion_longest_diameter_mm": 12.0,
+        "volume_cm3": 0.8,
+        "mean_hu": 40.0,
+    }
+    current_scan = {
+        "study_date": "2026/04/20",
+        "lesion_longest_diameter_mm": 12.0,
+        "volume_cm3": 0.8,
+        "mean_hu": 40.0,
+    }
+    comparison = generate_longitudinal_comparison(
+        case_id="CASE-2026-0894",
+        prior_study=prior_scan,
+        current_study=current_scan,
+    )
+    assert comparison.interval_days == 95
+
+

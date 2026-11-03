@@ -121,10 +121,14 @@ class LongitudinalComparisonReport(BaseModel):
 class TargetedSliceVQARequest(BaseModel):
     """
     Natural language visual question answering inquiry targeting a specific axial slice and tissue window.
+    Supports standard CT tissue windows as well as multi-sequence MRI presets.
     """
     case_id: str = "CASE-2026-0894"
     slice_index: int = Field(..., ge=1, le=512, description="Target axial slice (1..num_slices)")
-    tissue_window: Literal["soft_tissue", "lung", "bone", "liver", "mediastinum"] = "soft_tissue"
+    tissue_window: Literal[
+        "soft_tissue", "lung", "bone", "liver", "mediastinum",
+        "t2_weighted", "t1_weighted", "flair", "dwi_adc", "t1_contrast", "liver_dome"
+    ] = "soft_tissue"
     question: str = Field(..., min_length=3, max_length=1000)
 
 

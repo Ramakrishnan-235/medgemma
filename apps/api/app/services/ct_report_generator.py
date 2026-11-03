@@ -81,12 +81,15 @@ def generate_longitudinal_comparison(
     - Mean CT Hounsfield density shift (HU)
     - Categorization: Complete Response, Partial Response, Stable Disease, Progressive Disease.
     """
-    prior_date_str = prior_study.get("study_date", "2026-01-01")
-    current_date_str = current_study.get("study_date", "2026-04-01")
+    prior_date_str = str(prior_study.get("study_date", "2026-01-01"))
+    current_date_str = str(current_study.get("study_date", "2026-04-01"))
 
-    prior_dt = datetime.fromisoformat(prior_date_str)
-    current_dt = datetime.fromisoformat(current_date_str)
-    interval_days = abs((current_dt - prior_dt).days)
+    try:
+        prior_dt = datetime.fromisoformat(prior_date_str.replace("/", "-"))
+        current_dt = datetime.fromisoformat(current_date_str.replace("/", "-"))
+        interval_days = abs((current_dt - prior_dt).days)
+    except Exception:
+        interval_days = 90
 
     d_prior = float(prior_study.get("lesion_longest_diameter_mm", 10.0))
     d_curr = float(current_study.get("lesion_longest_diameter_mm", 10.0))

@@ -53,6 +53,7 @@ class TestVolumetricAPI(unittest.TestCase):
         self.assertIn("FINDINGS", data["findings_markdown"])
         self.assertIn("IMPRESSION", data["impression_markdown"])
         self.assertIn("Lungs/Pleura", data["organ_observations"])
+        self.assertNotIn("slice Axial slice", data["findings_markdown"])
 
     def test_longitudinal_comparison_endpoint(self):
         resp = self.client.post("/api/v1/volumetric/reports/longitudinal?case_id=CASE-2026-0894&prior_study_date=2026-01-15&current_study_date=2026-04-20")
@@ -96,6 +97,20 @@ class TestVolumetricAPI(unittest.TestCase):
         self.assertGreater(data["confidence_score"], 0.8)
         self.assertIn("answer_markdown", data)
         self.assertIsNotNone(data["grounded_box"])
+
+    def test_targeted_slice_vqa_mri_endpoint(self):
+        payload = {
+            "case_id": "CASE-2026-0894",
+            "slice_index": 64,
+            "tissue_window": "t2_weighted",
+            "question": "Describe the lesion on slice 64",
+        }
+        resp = self.client.post("/api/v1/volumetric/vqa", json=payload)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["slice_index"], 64)
+        self.assertGreater(data["confidence_score"], 0.8)
+
 
     def test_slice_visual_grounding_endpoint(self):
         resp = self.client.get("/api/v1/volumetric/grounding?case_id=CASE-2026-0894&slice_index=64&modality=3d_ct")
