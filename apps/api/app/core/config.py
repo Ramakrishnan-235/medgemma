@@ -67,6 +67,9 @@ class Settings(BaseModel):
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin_secret"
     S3_BUCKET_NAME: str = "clinical-cases"
+    S3_DICOM_BUCKET: str = "dicom-storage"
+    S3_NIFTI_BUCKET: str = "nifti-volumes"
+    S3_SEGMENTATION_BUCKET: str = "segmentations"
 
     JWKS_URL: str = "http://web:3000/api/auth/jwks"
     JWT_ISSUER: str = "http://localhost:3000"

@@ -11,7 +11,7 @@ from fastapi import HTTPException, status
 from app.core.config import settings
 
 logger = logging.getLogger("storage")
-FileKind = Literal["pdf", "dicom", "image_png", "image_jpeg", "ehr_note"]
+FileKind = Literal["pdf", "dicom", "image_png", "image_jpeg", "ehr_note", "nifti", "segmentation"]
 
 
 @dataclass(frozen=True)
@@ -42,23 +42,39 @@ class PrivateStorageAdapter:
         )
         self.bucket = settings.S3_BUCKET_NAME
 
-    def ensure_bucket_exists(self) -> None:
+    @property
+    def all_buckets(self) -> list[str]:
+        return [
+            self.bucket,
+            settings.S3_DICOM_BUCKET,
+            settings.S3_NIFTI_BUCKET,
+            settings.S3_SEGMENTATION_BUCKET,
+        ]
+
+    def ensure_bucket_exists(self, bucket_name: str | None = None) -> None:
+        target_bucket = bucket_name or self.bucket
         try:
-            self.internal_s3.head_bucket(Bucket=self.bucket)
+            self.internal_s3.head_bucket(Bucket=target_bucket)
         except ClientError:
             try:
-                self.internal_s3.create_bucket(Bucket=self.bucket)
-                logger.info("Created S3 bucket '%s'", self.bucket)
+                self.internal_s3.create_bucket(Bucket=target_bucket)
+                logger.info("Created S3 bucket '%s'", target_bucket)
             except ClientError as exc:
-                logger.warning("Could not create S3 bucket '%s': %s", self.bucket, exc)
+                logger.warning("Could not create S3 bucket '%s': %s", target_bucket, exc)
+
+    def ensure_buckets_exist(self) -> None:
+        """Idempotently ensures all required medical imaging and case buckets exist."""
+        for b in self.all_buckets:
+            self.ensure_bucket_exists(b)
 
     def create_presigned_put_url(
-        self, storage_key: str, mime_type: str, expires_in: int = 900
+        self, storage_key: str, mime_type: str, expires_in: int = 900, bucket_name: str | None = None
     ) -> str:
+        target_bucket = bucket_name or self.bucket
         return self.public_signer_s3.generate_presigned_url(
             ClientMethod="put_object",
             Params={
-                "Bucket": self.bucket,
+                "Bucket": target_bucket,
                 "Key": storage_key,
                 "ContentType": mime_type,
             },
@@ -66,38 +82,48 @@ class PrivateStorageAdapter:
         )
 
     def create_presigned_get_url(
-        self, storage_key: str, expires_in: int = 900
+        self, storage_key: str, expires_in: int = 900, bucket_name: str | None = None
     ) -> str:
+        target_bucket = bucket_name or self.bucket
         return self.public_signer_s3.generate_presigned_url(
             ClientMethod="get_object",
-            Params={"Bucket": self.bucket, "Key": storage_key},
+            Params={"Bucket": target_bucket, "Key": storage_key},
             ExpiresIn=expires_in,
         )
 
-    def get_object_bytes(self, storage_key: str) -> bytes:
-        resp = self.internal_s3.get_object(Bucket=self.bucket, Key=storage_key)
+    def put_object_bytes(
+        self, storage_key: str, data: bytes, mime_type: str = "application/octet-stream", bucket_name: str | None = None
+    ) -> None:
+        target_bucket = bucket_name or self.bucket
+        self.internal_s3.put_object(
+            Bucket=target_bucket,
+            Key=storage_key,
+            Body=data,
+            ContentType=mime_type,
+        )
+
+    def get_object_bytes(self, storage_key: str, bucket_name: str | None = None) -> bytes:
+        target_bucket = bucket_name or self.bucket
+        resp = self.internal_s3.get_object(Bucket=target_bucket, Key=storage_key)
         return resp["Body"].read()
 
-    def delete_object(self, storage_key: str) -> None:
+    def delete_object(self, storage_key: str, bucket_name: str | None = None) -> None:
+        target_bucket = bucket_name or self.bucket
         try:
-            self.internal_s3.delete_object(Bucket=self.bucket, Key=storage_key)
+            self.internal_s3.delete_object(Bucket=target_bucket, Key=storage_key)
         except ClientError as exc:
-            logger.warning("Failed to delete S3 object '%s': %s", storage_key, exc)
+            logger.warning("Failed to delete S3 object '%s' in '%s': %s", storage_key, target_bucket, exc)
 
     def verify_uploaded_bytes(
         self,
         storage_key: str,
         expected_sha256: str,
         declared_kind: FileKind,
+        bucket_name: str | None = None,
     ) -> VerifiedObjectInfo:
-        """
-        Streams the object in 64 KB chunks from private storage to verify:
-        1. Exact SHA-256 integrity against the client's declared checksum.
-        2. Magic header bytes (PDF, PNG, JPEG, DICOM preamble at offset 128).
-        Removes invalid or corrupted files immediately upon validation failure.
-        """
+        target_bucket = bucket_name or self.bucket
         try:
-            resp = self.internal_s3.get_object(Bucket=self.bucket, Key=storage_key)
+            resp = self.internal_s3.get_object(Bucket=target_bucket, Key=storage_key)
         except ClientError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -109,15 +135,15 @@ class PrivateStorageAdapter:
         total_bytes = 0
 
         for chunk in resp["Body"].iter_chunks(chunk_size=65536):
-            if len(header_buf) < 256:
-                needed = 256 - len(header_buf)
+            if len(header_buf) < 352:
+                needed = 352 - len(header_buf)
                 header_buf.extend(chunk[:needed])
             hasher.update(chunk)
             total_bytes += len(chunk)
 
         actual_sha256 = hasher.hexdigest().lower()
         if actual_sha256 != expected_sha256.lower():
-            self.delete_object(storage_key)
+            self.delete_object(storage_key, bucket_name=target_bucket)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}",
@@ -133,6 +159,12 @@ class PrivateStorageAdapter:
             invalid_reason = "Invalid JPEG magic bytes."
         elif declared_kind == "dicom" and (len(header) < 132 or header[128:132] != b"DICM"):
             invalid_reason = "Invalid DICOM preamble (missing DICM at offset 128)."
+        elif declared_kind in ("nifti", "segmentation"):
+            # Check gzip magic header (\x1f\x8b) for .nii.gz, or NIfTI-1 magic 'n+1\0' at offset 344 for uncompressed .nii
+            is_gzip = header.startswith(b"\x1f\x8b")
+            is_nii = len(header) >= 348 and header[344:348] in (b"n+1\0", b"ni1\0")
+            if not (is_gzip or is_nii):
+                invalid_reason = f"Invalid {declared_kind} file: must be gzip-compressed (.nii.gz) or NIfTI-1 (.nii)."
         elif declared_kind == "ehr_note":
             if total_bytes > 5 * 1024 * 1024:
                 invalid_reason = "EHR note exceeds maximum allowed size of 5 MB."

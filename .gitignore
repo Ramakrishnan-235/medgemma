@@ -38,3 +38,13 @@ medgemma-ui-design.html
 # Agent orchestration files
 .agents/
 
+.planning/PROJECT.md
+.planning/phases/01-medical-imaging-tech-stack-setup-architecture/01-SPEC.md
+.planning/phases/01-medical-imaging-tech-stack-setup-architecture/01-05-PLAN.md
+.planning/phases/01-medical-imaging-tech-stack-setup-architecture/01-04-PLAN.md
+.planning/phases/01-medical-imaging-tech-stack-setup-architecture/01-03-PLAN.md
+.planning/phases/01-medical-imaging-tech-stack-setup-architecture/01-02-PLAN.md
+.planning/phases/01-medical-imaging-tech-stack-setup-architecture/01-01-PLAN.md
+.planning/STATE.md
+.planning/ROADMAP.md
+.planning/REQUIREMENTS.md
