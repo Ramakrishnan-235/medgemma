@@ -19,7 +19,8 @@ class TestDockerizedMedGemmaService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(str(service.client.base_url), "http://custom-host:9000/v1/")
 
     async def test_generate_reasoning_trace(self):
-        service = DockerizedMedGemmaService()
+        with patch.dict(os.environ, {"MEDGEMMA_MODEL": "google/medgemma-1.5-4b"}, clear=False):
+            service = DockerizedMedGemmaService()
 
         # Create dummy 16x16 RGB images simulating slices
         test_images = [Image.new("RGB", (16, 16), color=(i, i, i)) for i in range(2)]

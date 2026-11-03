@@ -7,8 +7,9 @@ from PIL import Image
 
 class DockerizedMedGemmaService:
     def __init__(self):
-        # Points to the medgemma-engine container defined in docker-compose.yml
+        # Points to the medgemma-engine container defined in docker-compose.yml or Docker Model Runner
         base_url = os.getenv("MEDGEMMA_BASE_URL", "http://medgemma-engine:8000/v1")
+        self.model = os.getenv("MEDGEMMA_MODEL", "google/medgemma-1.5-4b")
         self.client = AsyncOpenAI(base_url=base_url, api_key="none")
 
     async def generate_reasoning_trace(self, images_64: list[Image.Image], telemetry: dict, roi_metrics: dict) -> str:
@@ -41,7 +42,7 @@ class DockerizedMedGemmaService:
 
         # 3. Request inference with token streaming
         response = await self.client.chat.completions.create(
-            model="google/medgemma-1.5-4b",
+            model=self.model,
             messages=messages,
             max_tokens=350,
             temperature=0.2,

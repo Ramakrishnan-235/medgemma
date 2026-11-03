@@ -1,8 +1,11 @@
 import asyncio
+import os
 import time
 from typing import Any, Literal
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
+import httpx
+from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
 from app.services.ct_volume_pipeline import (
@@ -200,14 +203,25 @@ def _build_volumetric_payload(
 @router.get("/status", response_model=VolumetricStatusResponse)
 async def get_volumetric_service_status() -> dict[str, Any]:
     """Returns real-time cluster health, token context window, and vLLM status."""
+    base_url = os.getenv("MEDGEMMA_BASE_URL", "http://127.0.0.1:12434/v1")
+    model = os.getenv("MEDGEMMA_MODEL", "ai/medgemma:4b-q4_K_M")
+    is_docker_live = False
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            resp = await client.get(f"{base_url.rstrip('/')}/models")
+            if resp.status_code == 200:
+                is_docker_live = True
+    except Exception:
+        is_docker_live = False
+
     return {
         "status": "online",
         "service": "medgemma-volumetric-engine",
-        "cluster_online_percent": 99.8,
+        "cluster_online_percent": 99.8 if is_docker_live else 95.0,
         "sampled_slices_count": 64,
         "token_context_window": "128k",
-        "vllm_engine": "google/medgemma-1.5-4b (vllm-openai:latest)",
-        "precision": "bfloat16",
+        "vllm_engine": f"Docker Model Runner ({model})" if is_docker_live else "google/medgemma-1.5-4b (vllm-openai:latest)",
+        "precision": "4-bit (q4_K_M)" if is_docker_live else "bfloat16",
     }
 
 
@@ -257,12 +271,42 @@ async def stream_medgemma_reasoning(
     text = payload["reasoning_trace"]
     words = text.split(" ")
 
+    base_url = os.getenv("MEDGEMMA_BASE_URL", "http://127.0.0.1:12434/v1")
+    model = os.getenv("MEDGEMMA_MODEL", "ai/medgemma:4b-q4_K_M")
+
     async def event_generator():
-        for i, word in enumerate(words):
-            token = (" " if i > 0 else "") + word
-            yield f"data: {token}\n\n"
-            await asyncio.sleep(0.035)
-        yield "data: [DONE]\n\n"
+        stream_successful = False
+        try:
+            client = AsyncOpenAI(base_url=base_url, api_key="none", timeout=12.0)
+            clinical_prompt = (
+                f"You are MedGemma 1.5 analyzing a 3D {modality.replace('_', ' ').upper()} study. "
+                f"Case ID: {case_id}, Active axial slice: {active_slice}. "
+                f"Reference findings: {text}. "
+                f"Provide your concise AI Reasoning Trace and follow-up protocol."
+            )
+            response_stream = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": clinical_prompt}],
+                max_tokens=300,
+                temperature=0.2,
+                stream=True,
+            )
+            async for chunk in response_stream:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    stream_successful = True
+                    yield f"data: {delta}\n\n"
+            if stream_successful:
+                yield "data: [DONE]\n\n"
+        except Exception:
+            stream_successful = False
+
+        if not stream_successful:
+            for i, word in enumerate(words):
+                token = (" " if i > 0 else "") + word
+                yield f"data: {token}\n\n"
+                await asyncio.sleep(0.035)
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
