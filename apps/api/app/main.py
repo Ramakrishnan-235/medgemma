@@ -64,7 +64,7 @@ async def system_info() -> dict[str, str]:
     }
 
 
-from app.api.v1 import api_v1_router
+from app.api.v1 import api_v1_router  # noqa: E402
 
 # Standard /api/v1 routes documented in OpenAPI /docs
 app.include_router(api_v1_router, prefix="/api")

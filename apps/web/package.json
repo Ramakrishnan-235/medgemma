@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "type-check": "tsc --noEmit",
+    "test": "bun test",
     "start": "next start",
     "lint": "eslint"
   },

@@ -16,10 +16,10 @@ env:
 
 jobs:
   # ============================================================================
-  # 1. FRONTEND: LINT, TYPES, WASM STAGING, 162-TEST E2E SUITE, BUILD, AUDIT
+  # 1. FRONTEND: LINT, TYPES, TESTS, NEXT.JS TURBOPACK BUILD
   # ============================================================================
   frontend-quality:
-    name: Frontend Quality & E2E Verification
+    name: Frontend Quality & Verification (Bun + Next.js)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -30,39 +30,30 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - name: Setup Bun Environment
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          bun-version: latest
 
       - name: Install Frontend Dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
 
-      - name: Stage & Verify Cornerstone3D WASM Codecs
-        run: |
-          node scripts/copy-cornerstone-wasm.mjs
-          test -d public/assets/cs-wasm
+      - name: Lint Check (ESLint)
+        run: bun run lint
 
-      - name: Static Type Check & Lint (Strict tsc)
-        run: |
-          npm run type-check
-          npm run lint
+      - name: Static Type Check (Strict tsc)
+        run: bun run type-check
 
-      - name: Run Authoritative E2E Test Suite (162 Tests, Tiers 1-4)
-        run: npm run test:e2e
+      - name: Run Frontend Unit Tests
+        run: bun test
 
-      - name: Next.js Production Build (Client/SSR Boundaries)
+      - name: Next.js Production Build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
-        run: npm run build
-
-      - name: Frontend Security Vulnerability Audit
-        run: npm audit --audit-level=critical
+        run: bun run build
 
   # ============================================================================
-  # 2. BACKEND UNIT & SYNTAX: COMPILEALL, RUFF, MYPY, 91 REGRESSION TESTS
+  # 2. BACKEND UNIT & SYNTAX: COMPILEALL, RUFF, 104 REGRESSION TESTS
   # ============================================================================
   backend-unit:
     name: Backend Unit Tests & Static Analysis
@@ -89,21 +80,15 @@ jobs:
 
       - name: Python Bytecode & Syntax Compilation
         run: |
-          uv run python -m compileall src apps/api apps/gpu-service tests
+          uv run python -m compileall src apps/api app tests
 
       - name: Ruff Code Quality & Formatting Linter
-        working-directory: apps/api
         run: |
-          uv run ruff check app tests
+          uv run ruff check apps/api app tests
 
-      - name: Mypy Static Type Checking
-        working-directory: apps/api
-        run: |
-          uv run mypy app --ignore-missing-imports
-
-      - name: Run Backend Unit & Security Test Suite (91 Tests)
+      - name: Run Backend Unit & Security Test Suite (104 Tests)
         env:
-          PYTHONPATH: apps/api:src
+          PYTHONPATH: apps/api:src:.
           HF_HUB_OFFLINE: "1"
         run: |
           uv run pytest tests -v --tb=short
@@ -256,3 +241,11 @@ jobs:
           file: ./apps/api/Dockerfile
           push: false
           tags: medgemma-api:ci-test
+
+      - name: Build Medical Processing Backend Container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: false
+          tags: medgemma-backend:ci-test

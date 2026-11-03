@@ -10,12 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.storage import storage_adapter
 from app.db.models import AIRun, Case, EvidenceChunk, ReportVersion, SourceFile
-from app.db.session import AsyncSessionLocal, dispose_engine
+from app.db.session import AsyncSessionLocal
 from app.services.ehr_summarizer import TwoPassEHRSummarizer
 from app.services.embeddings import E5_MODEL_NAME, embed_passages_cpu, retrieve_case_evidence
 from app.services.medgemma_adapter import MedGemmaAdapter
 from app.services.pdf_exporter import render_clinical_report_pdf
-from app.services.pdf_ocr_pipeline import HybridPdfOcrExtractor, PARSER_VERSION
+from app.services.pdf_ocr_pipeline import HybridPdfOcrExtractor
 from app.services.xray_analyzer import ChestXrayAnalysisService
 from app.workers.celery_app import celery_app
 from app.workers.run_lifecycle import RunOperation, RunResult, execute_ai_run

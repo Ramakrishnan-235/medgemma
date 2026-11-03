@@ -1,9 +1,6 @@
-import os
 import sys
 import json
 import time
-import base64
-import io
 import numpy as np
 from PIL import Image
 
@@ -22,7 +19,7 @@ def generate_synthetic_3d_ct_volume(
     dz: float = 1.25,   # slice thickness in mm (1.25mm)
 ):
     print(f"[*] Synthesizing 3D CT Volume: {num_slices} slices, {rows}x{cols} matrix...")
-    
+
     # 1. Initialize background with Air (-1000 HU)
     volume_hu = np.full((num_slices, rows, cols), -1000.0, dtype=np.float32)
     roi_mask = np.zeros((num_slices, rows, cols), dtype=np.uint8)
@@ -34,8 +31,8 @@ def generate_synthetic_3d_ct_volume(
 
     # 2. Add Body Oval & Organs across slices
     for z in range(num_slices):
-        z_pos_mm = (z - num_slices // 2) * dz
-        
+        _z_pos_mm = (z - num_slices // 2) * dz
+
         # Abdominal outer boundary (ellipse)
         body_mask = ((X / 160.0)**2 + (Y / 120.0)**2) <= 1.0
         # Subcutaneous fat layer (-100 HU)
@@ -82,7 +79,7 @@ def generate_synthetic_3d_ct_volume(
             cur_ry = radius_y_mm * rad_xy_scale
             if cur_rx <= 0.0 or cur_ry <= 0.0:
                 continue
-            
+
             lesion_slice = (((X - center_x_mm) / cur_rx)**2 + ((Y - center_y_mm) / cur_ry)**2) <= 1.0
             # Set lesion attenuation to 42 HU with subtle noise (+/- 2 HU)
             noise = np.random.normal(0, 1.5, size=(rows, cols)).astype(np.float32)
@@ -98,7 +95,7 @@ def compute_3d_quantification(volume_hu: np.ndarray, roi_mask: np.ndarray, spaci
     """Calculates 3D physical span, physical volume (cm³), and Mean HU."""
     dx, dy, dz = spacing_xyz
     z_idx, y_idx, x_idx = np.where(roi_mask > 0)
-    
+
     if len(z_idx) == 0:
         return {}
 
@@ -131,15 +128,15 @@ def compute_z_axis_attention_scores(roi_mask: np.ndarray, num_slices: int = 160)
     """
     slice_counts = np.array([np.count_nonzero(roi_mask[z]) for z in range(num_slices)], dtype=np.float32)
     max_count = slice_counts.max()
-    
+
     # Base background scanner noise (0.05 to 0.15)
     np.random.seed(42)
     scores = np.random.uniform(0.04, 0.12, size=num_slices).astype(np.float32)
-    
+
     if max_count > 0:
         # Scale anomaly scores proportionally to lesion cross-sectional area, peaking at ~0.964
         scores += (slice_counts / max_count) * 0.88
-        
+
     return np.clip(scores, 0.0, 1.0)
 
 
@@ -179,10 +176,10 @@ def main():
     start_time = time.time()
     # 1. Synthesize 3D CT volume
     vol_hu, roi_mask, spacing = generate_synthetic_3d_ct_volume(num_slices=160)
-    
+
     # 2. Run deterministic quantification
     metrics = compute_3d_quantification(vol_hu, roi_mask, spacing)
-    print(f"\n[+] Quantified 3D ROI Telemetry:")
+    print("\n[+] Quantified 3D ROI Telemetry:")
     print(f"    - Peak Axial Slice: {metrics['peak_slice']} / 160")
     print(f"    - 3D Dimensions   : {metrics['dimensions_str']}")
     print(f"    - Calculated Vol  : {metrics['volume_cm3']} cm³")
@@ -191,7 +188,7 @@ def main():
     # 3. Generate Z-axis anomaly scores
     z_scores = compute_z_axis_attention_scores(roi_mask, num_slices=160)
     peak_conf = z_scores[metrics['peak_slice']] * 100
-    print(f"\n[+] Z-Axis Anomaly Attention Gate:")
+    print("\n[+] Z-Axis Anomaly Attention Gate:")
     print(f"    - Peak Slice {metrics['peak_slice']} Confidence: {peak_conf:.1f}%")
 
     # 4. Sample 64 gated slices

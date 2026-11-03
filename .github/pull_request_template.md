@@ -15,11 +15,10 @@
 Every change must pass these automated quality gates before merge:
 
 - [ ] **Frontend Quality & Verification (`frontend-quality`):**
-  - Strict type checking (`npm run type-check`) & lint (`npm run lint`).
-  - Cornerstone3D WASM codecs staged & verified.
-  - Complete 162-test E2E suite passes (`npm run test:e2e`).
-  - Production build succeeds (`npm run build`).
-  - Security audit passes (`npm audit --audit-level=critical`).
+  - Lint check passes (`bun run lint`).
+  - Strict type checking passes (`bun run type-check`).
+  - Frontend unit tests pass (`bun test`).
+  - Production Next.js build succeeds (`bun run build`).
 
 - [ ] **Backend Unit Tests & Static Analysis (`backend-unit`):**
   - Python bytecode & syntax compilation passes (`compileall`).

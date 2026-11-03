@@ -58,7 +58,7 @@ class MedGemmaAdapter:
             "Respond strictly in JSON with keys: answer_markdown, cited_keys (list of strings), limitations_note."
         )
         user_prompt = (
-            f"EVIDENCE PASSAGES:\n" + "\n".join(context_lines) +
+            "EVIDENCE PASSAGES:\n" + "\n".join(context_lines) +
             f"\n\nCLINICAL QUESTION:\n{question}"
         )
 
