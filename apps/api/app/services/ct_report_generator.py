@@ -106,13 +106,18 @@ def generate_longitudinal_comparison(
     hu_attenuation_change = round(hu_curr - hu_prior, 1)
 
     # RECIST 1.1 Classification logic
+    is_progressive = (
+        (diameter_change_percent >= 20.0 and diameter_change_mm >= 5.0)
+        or (diameter_change_percent >= 25.0 and diameter_change_mm >= 2.0)
+    )
+
     if d_curr <= 0.0 and v_curr <= 0.0:
         recist_category = "Complete Response"
         summary_text = f"Complete resolution of target lesion over {interval_days}-day interval."
     elif diameter_change_percent <= -30.0:
         recist_category = "Partial Response"
         summary_text = f"Target lesion decreased in longest axial diameter by {abs(diameter_change_percent):.1f}% (from {d_prior}mm to {d_curr}mm) over {interval_days} days."
-    elif diameter_change_percent >= 20.0 and diameter_change_mm >= 5.0 or (diameter_change_percent >= 25.0 and diameter_change_mm >= 2.0):
+    elif is_progressive:
         recist_category = "Progressive Disease"
         summary_text = f"Target lesion increased in longest axial diameter by {diameter_change_percent:+.1f}% (from {d_prior}mm to {d_curr}mm, volume {volume_change_percent:+.1f}%) over {interval_days} days."
     else:

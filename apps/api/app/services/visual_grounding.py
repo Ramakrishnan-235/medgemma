@@ -1,5 +1,3 @@
-import uuid
-from typing import Any
 from app.schemas.ct_clinical import NormalizedBox1000, VisualGroundingAnnotation
 
 

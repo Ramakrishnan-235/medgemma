@@ -41,6 +41,8 @@ export function VisualGroundingOverlay({
         </defs>
 
         {annotations.map((anno) => {
+          if (!anno.box_1000) return null;
+
           const { left, top, width: boxWidth, height: boxHeight } = parseBoundingBox1000(
             anno.box_1000,
             width,
@@ -52,6 +54,7 @@ export function VisualGroundingOverlay({
           // Styling colors: Lesion = Coral/Peach, Reference Anatomy = Ice Blue
           const strokeColor = isLesion ? "#FFB7B2" : "#88CCF1";
           const fillColor = isLesion ? "rgba(255, 183, 178, 0.18)" : "rgba(136, 204, 241, 0.12)";
+          const pillWidth = Math.min(220, Math.max(110, anno.label.length * 6.8 + 52));
 
           return (
             <g
@@ -85,7 +88,7 @@ export function VisualGroundingOverlay({
                 <rect
                   x={0}
                   y={-14}
-                  width={Math.min(220, Math.max(110, anno.label.length * 6.8 + 52))}
+                  width={pillWidth}
                   height={18}
                   rx={3}
                   fill="#09090b"
@@ -100,10 +103,10 @@ export function VisualGroundingOverlay({
                   fontFamily="system-ui, sans-serif"
                   fontWeight="600"
                 >
-                  {anno.label.length > 22 ? anno.label.slice(0, 20) + "..." : anno.label}
+                  {anno.label.length > 22 ? `${anno.label.slice(0, 20)}...` : anno.label}
                 </text>
                 <text
-                  x={Math.min(214, Math.max(104, anno.label.length * 6.8 + 46))}
+                  x={pillWidth - 6}
                   y={-2}
                   textAnchor="end"
                   fill={isLesion ? "#FFB7B2" : "#88CCF1"}

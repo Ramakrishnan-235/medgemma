@@ -12,65 +12,36 @@ def evaluate_lung_rads_v2022(
     Evaluates nodule criteria according to the American College of Radiology (ACR)
     Lung-RADS v2022 guidelines.
     """
-    if nodule_type == "none" or diameter_mm <= 0.0:
-        return LungRadsAssessment(
-            category="1",
-            score_description="Negative: No lung nodules detected",
-            malignancy_probability=0.005,
-            recommended_management="Continue annual low-dose screening CT (LDCT) in 12 months",
-            primary_nodule_size_mm=0.0,
-            nodule_type="none",
-        )
+    category: Literal["0", "1", "2", "3", "4A", "4B", "4X"]
 
-    # Solid nodule logic
-    if nodule_type == "solid":
+    if nodule_type == "none" or diameter_mm <= 0.0:
+        category, desc, prob, mgmt = (
+            "1",
+            "Negative: No lung nodules detected",
+            0.005,
+            "Continue annual low-dose screening CT (LDCT) in 12 months",
+        )
+    elif nodule_type == "solid":
         if diameter_mm < 6.0:
-            category: Literal["0", "1", "2", "3", "4A", "4B", "4X"] = "2"
-            desc = f"Benign appearance: Solid nodule < 6 mm ({diameter_mm:.1f} mm)"
-            prob = 0.008
-            mgmt = "Continue annual LDCT in 12 months"
+            category, desc, prob, mgmt = "2", f"Benign appearance: Solid nodule < 6 mm ({diameter_mm:.1f} mm)", 0.008, "Continue annual LDCT in 12 months"
         elif diameter_mm < 8.0:
-            category = "3"
-            desc = f"Probably benign: Solid nodule 6 to < 8 mm ({diameter_mm:.1f} mm)"
-            prob = 0.02
-            mgmt = "6-month LDCT follow-up"
-        elif diameter_mm < 15.0:
-            category = "4A"
-            desc = f"Suspicious: Solid nodule 8 to < 15 mm ({diameter_mm:.1f} mm)"
-            prob = 0.10
-            mgmt = "3-month LDCT or PET-CT"
+            category, desc, prob, mgmt = "3", f"Probably benign: Solid nodule 6 to < 8 mm ({diameter_mm:.1f} mm)", 0.02, "6-month LDCT follow-up"
+        elif diameter_mm < 15.0 and not (is_new and diameter_mm >= 4.0):
+            category, desc, prob, mgmt = "4A", f"Suspicious: Solid nodule 8 to < 15 mm ({diameter_mm:.1f} mm)", 0.10, "3-month LDCT or PET-CT"
         else:
-            category = "4B"
-            desc = f"Very suspicious: Solid nodule >= 15 mm ({diameter_mm:.1f} mm)"
-            prob = 0.28
-            mgmt = "Chest CT with contrast, PET-CT, and/or tissue sampling (biopsy)"
+            category, desc, prob, mgmt = "4B", f"Very suspicious: Solid nodule >= 15 mm ({diameter_mm:.1f} mm)", 0.28, "Chest CT with contrast, PET-CT, and/or tissue sampling (biopsy)"
     elif nodule_type == "part_solid":
         if diameter_mm < 6.0:
-            category = "2"
-            desc = f"Benign appearance: Part-solid nodule < 6 mm ({diameter_mm:.1f} mm)"
-            prob = 0.008
-            mgmt = "Continue annual LDCT in 12 months"
+            category, desc, prob, mgmt = "2", f"Benign appearance: Part-solid nodule < 6 mm ({diameter_mm:.1f} mm)", 0.008, "Continue annual LDCT in 12 months"
         elif diameter_mm < 8.0:
-            category = "3"
-            desc = f"Probably benign: Part-solid nodule >= 6 mm with solid component < 6 mm"
-            prob = 0.02
-            mgmt = "6-month LDCT follow-up"
+            category, desc, prob, mgmt = "3", "Probably benign: Part-solid nodule >= 6 mm with solid component < 6 mm", 0.02, "6-month LDCT follow-up"
         else:
-            category = "4A"
-            desc = f"Suspicious: Part-solid nodule with solid component >= 6 mm"
-            prob = 0.12
-            mgmt = "3-month LDCT or PET-CT"
+            category, desc, prob, mgmt = "4A", "Suspicious: Part-solid nodule with solid component >= 6 mm", 0.12, "3-month LDCT or PET-CT"
     else:  # ground_glass
         if diameter_mm < 30.0:
-            category = "2"
-            desc = f"Benign appearance: Non-solid (ground-glass) nodule < 30 mm"
-            prob = 0.008
-            mgmt = "Annual LDCT in 12 months"
+            category, desc, prob, mgmt = "2", "Benign appearance: Non-solid (ground-glass) nodule < 30 mm", 0.008, "Annual LDCT in 12 months"
         else:
-            category = "3"
-            desc = f"Probably benign: Non-solid nodule >= 30 mm"
-            prob = 0.02
-            mgmt = "6-month LDCT follow-up"
+            category, desc, prob, mgmt = "3", "Probably benign: Non-solid nodule >= 30 mm", 0.02, "6-month LDCT follow-up"
 
     # Up-classify to 4X if additional suspicious imaging features exist
     if has_spiculation_or_high_risk and category in ("3", "4A", "4B"):
@@ -102,30 +73,51 @@ def classify_ct_rate_abnormalities(
     """
     lbl = primary_roi_label.lower()
 
-    # Base baseline normal score
-    normal_prob = 0.05 if (lbl and "normal" not in lbl) else 0.92
-
-    # Initialize scores for all 18 labels
-    scores = {
-        "medical_device": 0.88 if any(k in lbl for k in ("port", "pacemaker", "lead", "stent", "device", "catheter")) else 0.02,
-        "nodule": 0.94 if any(k in lbl for k in ("nodule", "nodular", "lesion", "liver dome", "segment vii")) else 0.05,
-        "emphysema": 0.85 if "emphysema" in lbl or mean_hu < -950 else 0.04,
-        "fibrosis": 0.82 if any(k in lbl for k in ("fibrosis", "reticulation", "honeycombing")) else 0.03,
-        "consolidation": 0.89 if any(k in lbl for k in ("consolidation", "air bronchogram", "dense opacity")) else 0.05,
-        "atelectasis": 0.88 if any(k in lbl for k in ("atelectasis", "subsegmental collapse", "linear opacity")) else 0.06,
-        "bronchiectasis": 0.84 if any(k in lbl for k in ("bronchiectasis", "bronchial wall thickening")) else 0.02,
-        "pleural_effusion": 0.92 if any(k in lbl for k in ("pleural effusion", "effusion", "fluid collection")) else 0.03,
-        "pleural_thickening": 0.81 if any(k in lbl for k in ("pleural thickening", "pleural plaque")) else 0.04,
-        "pericardial_effusion": 0.87 if "pericardial effusion" in lbl else 0.02,
-        "lymphadenopathy": 0.86 if any(k in lbl for k in ("lymphadenopathy", "enlarged node", "lymph node")) else 0.03,
-        "cardiomegaly": 0.88 if any(k in lbl for k in ("cardiomegaly", "enlarged heart", "cardiothoracic ratio")) else 0.05,
-        "aortic_calcification": 0.89 if any(k in lbl for k in ("aortic calcification", "atherosclerosis")) or (mean_hu > 350 and "aorta" in lbl) else 0.08,
-        "coronary_calcification": 0.91 if any(k in lbl for k in ("coronary", "cac", "coronary artery calcification")) else 0.07,
-        "hiatal_hernia": 0.88 if any(k in lbl for k in ("hiatal hernia", "retrocardiac mass", "hernia")) else 0.02,
-        "mass": 0.93 if any(k in lbl for k in ("mass", "tumor", "neoplasm")) or volume_cm3 > 15.0 else 0.04,
-        "fracture": 0.95 if any(k in lbl for k in ("fracture", "cortical break", "osseous disruption")) else 0.02,
-        "normal": normal_prob,
+    condition_keywords: dict[str, tuple[str, ...]] = {
+        "medical_device": ("port", "pacemaker", "lead", "stent", "device", "catheter"),
+        "nodule": ("nodule", "nodular", "lesion", "liver dome", "segment vii"),
+        "emphysema": ("emphysema",),
+        "fibrosis": ("fibrosis", "reticulation", "honeycombing"),
+        "consolidation": ("consolidation", "air bronchogram", "dense opacity"),
+        "atelectasis": ("atelectasis", "subsegmental collapse", "linear opacity"),
+        "bronchiectasis": ("bronchiectasis", "bronchial wall thickening"),
+        "pleural_effusion": ("pleural effusion", "effusion", "fluid collection"),
+        "pleural_thickening": ("pleural thickening", "pleural plaque"),
+        "pericardial_effusion": ("pericardial effusion",),
+        "lymphadenopathy": ("lymphadenopathy", "enlarged node", "lymph node"),
+        "cardiomegaly": ("cardiomegaly", "enlarged heart", "cardiothoracic ratio"),
+        "aortic_calcification": ("aortic calcification", "atherosclerosis"),
+        "coronary_calcification": ("coronary", "cac", "coronary artery calcification"),
+        "hiatal_hernia": ("hiatal hernia", "retrocardiac mass", "hernia"),
+        "mass": ("mass", "tumor", "neoplasm"),
+        "fracture": ("fracture", "cortical break", "osseous disruption"),
     }
 
+    # Calibrated high and low probabilities
+    high_probs = {
+        "fracture": 0.95, "nodule": 0.94, "mass": 0.93, "pleural_effusion": 0.92,
+        "coronary_calcification": 0.91, "aortic_calcification": 0.89, "consolidation": 0.89,
+        "medical_device": 0.88, "atelectasis": 0.88, "cardiomegaly": 0.88, "hiatal_hernia": 0.88,
+        "pericardial_effusion": 0.87, "lymphadenopathy": 0.86, "emphysema": 0.85,
+        "bronchiectasis": 0.84, "fibrosis": 0.82, "pleural_thickening": 0.81,
+    }
+    low_probs = {
+        "aortic_calcification": 0.08, "coronary_calcification": 0.07, "atelectasis": 0.06,
+        "nodule": 0.05, "consolidation": 0.05, "cardiomegaly": 0.05,
+    }
+
+    scores: dict[str, float] = {}
+    for condition, keywords in condition_keywords.items():
+        matched = any(kw in lbl for kw in keywords)
+        if condition == "emphysema" and mean_hu < -950:
+            matched = True
+        elif condition == "aortic_calcification" and (mean_hu > 350 and "aorta" in lbl):
+            matched = True
+        elif condition == "mass" and volume_cm3 > 15.0:
+            matched = True
+
+        scores[condition] = high_probs.get(condition, 0.88) if matched else low_probs.get(condition, 0.03)
+
+    scores["normal"] = 0.05 if (lbl and "normal" not in lbl) else 0.92
     return CTRateMultiOrganLabels(**scores)
 
