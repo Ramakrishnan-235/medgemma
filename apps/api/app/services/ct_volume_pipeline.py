@@ -55,9 +55,9 @@ def generate_synthetic_3d_ct_volume(
         spine_mask = ((X / 18.0)**2 + ((Y - 70.0) / 18.0)**2) <= 1.0
         volume_hu[z, spine_mask] = 700.0
 
-    # 3. Inject [CT-ROI-01] Segment VII Hypodense Liver Lesion centered at Slice 64
+    # 3. Inject [CT-ROI-01] Segment VII Hypodense Liver Lesion centered at Slice 64 (or midpoint if fewer slices)
     # Target: ~14.2mm (X) x ~11.8mm (Y) x ~12.0mm (Z), Mean HU = 42
-    target_z_slice = 64
+    target_z_slice = min(64, num_slices // 2) if num_slices < 64 else 64
     center_z_mm = (target_z_slice - num_slices // 2) * dz
     center_x_mm = -45.0
     center_y_mm = -35.0

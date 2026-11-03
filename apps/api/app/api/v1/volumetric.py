@@ -2,11 +2,11 @@ import asyncio
 import os
 import time
 from typing import Any, Literal
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.services.ct_volume_pipeline import (
     compute_3d_quantification,
@@ -93,6 +93,7 @@ def _build_volumetric_payload(
     num_slices: int = 160,
 ) -> dict[str, Any]:
     start_time = time.time()
+    active_slice = max(1, min(active_slice, num_slices))
 
     # 1. Retrieve or generate base volume telemetry
     metrics, z_raw_scores, sampled_slices = _get_base_volumetric_data(num_slices=num_slices)
@@ -134,7 +135,7 @@ def _build_volumetric_payload(
         primary_roi = {
             "id": roi_id,
             "label": "Segment VII hyperintense focal lesion",
-            "location": f"Axial slice {metrics['peak_slice']} (liver dome / segment VII)",
+            "location": f"Axial slice {metrics.get('peak_slice', active_slice)} (liver dome / segment VII)",
             "dimensions_str": "14.2 × 11.8 × 12.0 mm",
             "volume_cm3": 1.05,
             "attenuation_or_intensity": "T2 hyperintense / restricted diffusion (ADC: 0.82 × 10⁻³ mm²/s)",
@@ -173,7 +174,7 @@ def _build_volumetric_payload(
         primary_roi = {
             "id": roi_id,
             "label": "Segment VII hypodense lesion",
-            "location": f"Axial slice {metrics['peak_slice']} (liver dome)",
+            "location": f"Axial slice {metrics.get('peak_slice', active_slice)} (liver dome)",
             "dimensions_str": "14.2 × 11.8 × 12.0 mm",
             "volume_cm3": 1.05,
             "attenuation_or_intensity": "42 HU (soft tissue window)",
@@ -246,10 +247,10 @@ async def get_volumetric_service_status() -> dict[str, Any]:
 @router.post("/analyze-volume", response_model=VolumetricAnalysisResponse)
 @router.get("/analyze-volume", response_model=VolumetricAnalysisResponse)
 async def analyze_volumetric_study(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
     modality: Literal["3d_mri", "3d_ct", "wsi"] = Query("3d_mri", description="Diagnostic modality"),
-    sequence_preset: str = Query("t2_weighted", description="Window/Sequence preset"),
-    active_slice: int = Query(64, ge=1, le=160, description="Active axial slice"),
+    sequence_preset: str = Query("t2_weighted", min_length=1, max_length=64, description="Window/Sequence preset"),
+    active_slice: int = Query(64, ge=1, le=512, description="Active axial slice"),
     num_slices: int = Query(160, ge=16, le=512, description="Total volume slices"),
 ) -> dict[str, Any]:
     """Performs multi-planar reconstruction telemetry, 3D ROI quantification, and Z-attention gating."""
@@ -265,9 +266,9 @@ async def analyze_volumetric_study(
 @ct_router.post("/analyze-volume")
 @ct_router.get("/analyze-volume")
 async def analyze_ct_volume_alias(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
-    sequence_preset: str = Query("soft_tissue", description="Preset"),
-    active_slice: int = Query(64, ge=1, le=160),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
+    sequence_preset: str = Query("soft_tissue", min_length=1, max_length=64, description="Preset"),
+    active_slice: int = Query(64, ge=1, le=512),
 ) -> dict[str, Any]:
     """Direct alias for compatibility with the /api/v1/ct/analyze-volume endpoint."""
     return _build_volumetric_payload(
@@ -280,9 +281,9 @@ async def analyze_ct_volume_alias(
 
 @router.post("/stream-reasoning")
 async def stream_medgemma_reasoning(
-    case_id: str = Query("CASE-2026-0894"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$"),
     modality: Literal["3d_mri", "3d_ct"] = Query("3d_mri"),
-    active_slice: int = Query(64),
+    active_slice: int = Query(64, ge=1, le=512),
 ):
     """Streams MedGemma 1.5 volumetric reasoning trace token-by-token over SSE."""
     payload = _build_volumetric_payload(case_id=case_id, modality=modality, active_slice=active_slice)
@@ -331,9 +332,9 @@ async def stream_medgemma_reasoning(
 
 @router.post("/export-manifest")
 async def export_volumetric_manifest(
-    case_id: str = Query("CASE-2026-0894"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$"),
     modality: Literal["3d_mri", "3d_ct"] = Query("3d_mri"),
-    active_slice: int = Query(64),
+    active_slice: int = Query(64, ge=1, le=512),
 ) -> dict[str, Any]:
     """Generates standard DICOM-SEG and NIfTI-1 volumetric segmentation bundle manifest."""
     is_mri = modality == "3d_mri"
@@ -360,7 +361,7 @@ async def export_volumetric_manifest(
 @router.post("/reports/free-form", response_model=FreeFormRadiologyReport)
 @router.get("/reports/free-form", response_model=FreeFormRadiologyReport)
 async def get_free_form_radiology_report(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
     modality: Literal["3d_ct", "3d_mri"] = Query("3d_ct", description="Modality"),
 ) -> FreeFormRadiologyReport:
     """Generates comprehensive narrative RSNA radiology report with Findings & Impression."""
@@ -382,9 +383,9 @@ async def get_free_form_radiology_report(
 @router.post("/reports/longitudinal", response_model=LongitudinalComparisonReport)
 @router.get("/reports/longitudinal", response_model=LongitudinalComparisonReport)
 async def get_longitudinal_comparison_report(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
-    prior_study_date: str = Query("2026-01-15", description="Prior CT date (YYYY-MM-DD)"),
-    current_study_date: str = Query("2026-04-20", description="Current CT date (YYYY-MM-DD)"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
+    prior_study_date: str = Query("2026-01-15", pattern=r"^\d{4}[-/]\d{2}[-/]\d{2}$", description="Prior CT date (YYYY-MM-DD)"),
+    current_study_date: str = Query("2026-04-20", pattern=r"^\d{4}[-/]\d{2}[-/]\d{2}$", description="Current CT date (YYYY-MM-DD)"),
 ) -> LongitudinalComparisonReport:
     """Quantifies longitudinal interval changes (RECIST 1.1) in lesion size, volume, and density."""
     prior_study = {
@@ -409,8 +410,8 @@ async def get_longitudinal_comparison_report(
 @router.post("/fhir/diagnostic-bundle")
 @router.get("/fhir/diagnostic-bundle")
 async def get_fhir_diagnostic_bundle(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
-    patient_id: str = Query("PAT-9842", description="Patient ID"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
+    patient_id: str = Query("PAT-9842", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Patient ID"),
 ) -> dict[str, Any]:
     """Generates an HL7 FHIR R4 Bundle containing DiagnosticReport and linked Observations."""
     measurements = [
@@ -431,8 +432,8 @@ async def get_fhir_diagnostic_bundle(
 @router.post("/classifications")
 @router.get("/classifications")
 async def get_diagnostic_classifications(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
-    diameter_mm: float = Query(9.5, description="Nodule diameter (mm)"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
+    diameter_mm: float = Query(9.5, ge=0.0, le=500.0, description="Nodule diameter (mm)"),
 ) -> dict[str, Any]:
     """Outputs Lung-RADS v2022 score and CT-RATE 18 multi-organ abnormality probabilities."""
     lung_rads = evaluate_lung_rads_v2022(diameter_mm=diameter_mm, nodule_type="solid")
@@ -453,25 +454,31 @@ async def get_diagnostic_classifications(
 @router.get("/vqa", response_model=TargetedSliceVQAResponse)
 async def query_targeted_slice_vqa(
     payload: TargetedSliceVQARequest | None = None,
-    case_id: str = Query("CASE-2026-0894"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$"),
     slice_index: int = Query(64, ge=1, le=512),
-    tissue_window: str = Query("soft_tissue", description="Tissue window or sequence preset"),
-    question: str = Query("Describe the lesion on slice 64"),
+    tissue_window: Literal[
+        "soft_tissue", "lung", "bone", "liver", "mediastinum",
+        "t2_weighted", "t1_weighted", "flair", "dwi_adc", "t1_contrast", "liver_dome"
+    ] = Query("soft_tissue", description="Tissue window or sequence preset"),
+    question: str = Query("Describe the lesion on slice 64", min_length=3, max_length=1000),
 ) -> TargetedSliceVQAResponse:
     """Answers clinical natural language visual question answering for a specific axial slice."""
     if payload is None:
-        payload = TargetedSliceVQARequest(
-            case_id=case_id,
-            slice_index=slice_index,
-            tissue_window=tissue_window,
-            question=question,
-        )
+        try:
+            payload = TargetedSliceVQARequest(
+                case_id=case_id,
+                slice_index=slice_index,
+                tissue_window=tissue_window,
+                question=question,
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors())
     return answer_targeted_slice_question(payload)
 
 
 @router.get("/grounding", response_model=list[VisualGroundingAnnotation])
 async def get_slice_visual_grounding(
-    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    case_id: str = Query("CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$", description="Case ID"),
     slice_index: int = Query(64, ge=1, le=512, description="Axial slice index"),
     modality: Literal["3d_ct", "3d_mri"] = Query("3d_ct"),
 ) -> list[VisualGroundingAnnotation]:

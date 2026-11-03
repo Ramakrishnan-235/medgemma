@@ -223,10 +223,17 @@ export function parseBoundingBox1000(
   canvasWidth: number,
   canvasHeight: number
 ): PixelBoundingBox {
-  const left = Math.round((box.xmin / 1000) * canvasWidth);
-  const top = Math.round((box.ymin / 1000) * canvasHeight);
-  const width = Math.round(((box.xmax - box.xmin) / 1000) * canvasWidth);
-  const height = Math.round(((box.ymax - box.ymin) / 1000) * canvasHeight);
+  const safeW = Math.max(0, canvasWidth || 0);
+  const safeH = Math.max(0, canvasHeight || 0);
+  const xmin = Math.max(0, Math.min(1000, box?.xmin ?? 0));
+  const xmax = Math.max(xmin, Math.min(1000, box?.xmax ?? 1000));
+  const ymin = Math.max(0, Math.min(1000, box?.ymin ?? 0));
+  const ymax = Math.max(ymin, Math.min(1000, box?.ymax ?? 1000));
+
+  const left = Math.round((xmin / 1000) * safeW);
+  const top = Math.round((ymin / 1000) * safeH);
+  const width = Math.max(0, Math.round(((xmax - xmin) / 1000) * safeW));
+  const height = Math.max(0, Math.round(((ymax - ymin) / 1000) * safeH));
   return { left, top, width, height };
 }
 

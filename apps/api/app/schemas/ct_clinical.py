@@ -85,7 +85,7 @@ class FreeFormRadiologyReport(BaseModel):
     """
     RSNA-style free-form narrative radiology report from 3D CT axial volumes.
     """
-    case_id: str
+    case_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$")
     modality: str = "3D CT"
     technique: str
     comparison: str = "None available"
@@ -99,7 +99,7 @@ class LongitudinalComparisonReport(BaseModel):
     """
     Quantified comparison between prior and current CT scans (RECIST 1.1).
     """
-    case_id: str
+    case_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$")
     prior_study_date: str
     current_study_date: str
     interval_days: int
@@ -123,7 +123,7 @@ class TargetedSliceVQARequest(BaseModel):
     Natural language visual question answering inquiry targeting a specific axial slice and tissue window.
     Supports standard CT tissue windows as well as multi-sequence MRI presets.
     """
-    case_id: str = "CASE-2026-0894"
+    case_id: str = Field(default="CASE-2026-0894", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_\-\.]+$")
     slice_index: int = Field(..., ge=1, le=512, description="Target axial slice (1..num_slices)")
     tissue_window: Literal[
         "soft_tissue", "lung", "bone", "liver", "mediastinum",

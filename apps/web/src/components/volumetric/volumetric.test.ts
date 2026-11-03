@@ -55,4 +55,29 @@ describe("Volumetric API & Simulation Logic", () => {
     expect(px.width).toBe(250); // ((800 - 300) / 1000) * 500
     expect(px.height).toBe(160); // ((600 - 200) / 1000) * 400
   });
+
+  it("defensively handles malformed, inverted, or negative bounding boxes without NaN or negative sizes", () => {
+    // Malformed inverted coordinates
+    const invertedBox = { ymin: 800, xmin: 900, ymax: 200, xmax: 300 };
+    const pxInverted = parseBoundingBox1000(invertedBox, 500, 400);
+    expect(pxInverted.width).toBeGreaterThanOrEqual(0);
+    expect(pxInverted.height).toBeGreaterThanOrEqual(0);
+    expect(Number.isNaN(pxInverted.left)).toBe(false);
+    expect(Number.isNaN(pxInverted.top)).toBe(false);
+
+    // Negative / out-of-bounds coordinates
+    const outOfBoundsBox = { ymin: -50, xmin: -100, ymax: 1200, xmax: 1500 };
+    const pxOutOfBounds = parseBoundingBox1000(outOfBoundsBox, 500, 400);
+    expect(pxOutOfBounds.left).toBe(0);
+    expect(pxOutOfBounds.top).toBe(0);
+    expect(pxOutOfBounds.width).toBeLessThanOrEqual(500);
+    expect(pxOutOfBounds.height).toBeLessThanOrEqual(400);
+
+    // Zero or negative canvas dimensions
+    const pxZeroCanvas = parseBoundingBox1000({ ymin: 100, xmin: 100, ymax: 500, xmax: 500 }, 0, 0);
+    expect(pxZeroCanvas.width).toBe(0);
+    expect(pxZeroCanvas.height).toBe(0);
+    expect(pxZeroCanvas.left).toBe(0);
+    expect(pxZeroCanvas.top).toBe(0);
+  });
 });
