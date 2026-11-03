@@ -175,3 +175,4 @@ def build_fhir_r4_diagnostic_bundle(
         "timestamp": now_iso,
         "entry": entries,
     }
+

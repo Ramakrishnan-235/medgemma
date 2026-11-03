@@ -52,3 +52,4 @@ Implement the 5 requested core capabilities for MedGemma:
 | FHIR schema non-conformance for EHR ingestion | High | Conformance testing against HL7 FHIR R4 spec (LOINC + UCUM units) |
 | Missing baseline CT in longitudinal comparison | Med | Explicit fallback detection and validation with helpful clinical guidance |
 | High latency or unconstrained LLM responses | Med | Constrained decoding regex / schema parser with deterministic fallback responses |
+

@@ -47,3 +47,4 @@ def test_answer_targeted_slice_lung_window_question():
     assert ans.slice_index == 45
     assert ans.confidence_score >= 0.85
     assert "lung parenchyma" in ans.answer_markdown.lower()
+

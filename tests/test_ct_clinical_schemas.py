@@ -124,3 +124,4 @@ def test_visual_grounding_annotation_schema():
     )
     assert anno.box_1000.ymin == 350
     assert anno.confidence == 0.964
+

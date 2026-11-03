@@ -47,3 +47,4 @@ def test_build_fhir_r4_diagnostic_bundle():
     )
     assert rads_obs is not None
     assert rads_obs["valueCodeableConcept"]["coding"][0]["code"] == "4A"
+

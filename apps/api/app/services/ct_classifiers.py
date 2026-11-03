@@ -128,3 +128,4 @@ def classify_ct_rate_abnormalities(
     }
 
     return CTRateMultiOrganLabels(**scores)
+

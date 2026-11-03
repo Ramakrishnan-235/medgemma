@@ -65,3 +65,4 @@ def get_slice_grounding_annotations(
         )
 
     return annotations
+

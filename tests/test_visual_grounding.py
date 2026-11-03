@@ -34,3 +34,4 @@ def test_get_slice_grounding_distant_slice():
     annotations = get_slice_grounding_annotations("CASE-2026-0894", slice_index=150)
     lesion_boxes = [a for a in annotations if "lesion" in a.label.lower()]
     assert len(lesion_boxes) == 0
+

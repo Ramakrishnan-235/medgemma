@@ -129,3 +129,4 @@ def generate_longitudinal_comparison(
         recist_category=recist_category,
         summary_text=summary_text,
     )
+

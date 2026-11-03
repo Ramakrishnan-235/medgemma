@@ -72,3 +72,4 @@ def test_classify_ct_rate_fracture_and_effusion():
     )
     assert labels.pleural_effusion >= 0.80
     assert labels.fracture >= 0.80
+

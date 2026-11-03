@@ -75,3 +75,4 @@ def test_generate_longitudinal_comparison_stable():
     )
     assert comparison.recist_category == "Stable Disease"
     assert comparison.interval_days == 95
+

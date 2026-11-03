@@ -153,3 +153,4 @@ class VisualGroundingAnnotation(BaseModel):
     finding_type: str
     mean_hu: float | None = None
     dimensions_mm: str | None = None
+
