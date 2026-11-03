@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { DiagnosticModality, VolumetricAnalysisPayload } from "./types";
+import { fetchSliceVQA } from "./api";
+import { DiagnosticModality, TargetedSliceVQAResponse, VolumetricAnalysisPayload } from "./types";
 
 interface VolumetricSidebarProps {
   modality: DiagnosticModality;
@@ -25,10 +26,32 @@ export function VolumetricSidebar({
   onOpenCitationModal,
 }: VolumetricSidebarProps) {
   const [accordionOpen, setAccordionOpen] = useState(false);
+  const [vqaQuestion, setVqaQuestion] = useState("");
+  const [vqaLoading, setVqaLoading] = useState(false);
+  const [vqaResponse, setVqaResponse] = useState<TargetedSliceVQAResponse | null>(null);
+
   const isMri = modality === "3d_mri";
   const primaryRoi = analysisData?.primary_roi;
   const secondaryRoi = analysisData?.secondary_rois?.[0];
   const telemetry = analysisData?.scanner_telemetry;
+  const activeSlice = analysisData?.active_slice || 64;
+
+  const handleAskVqa = async (customQ?: string) => {
+    const q = customQ || vqaQuestion;
+    if (!q.trim()) return;
+    setVqaLoading(true);
+    try {
+      const resp = await fetchSliceVQA({
+        case_id: analysisData?.case_id || "CASE-2026-0894",
+        slice_index: activeSlice,
+        tissue_window: (analysisData?.sequence_preset as any) || "soft_tissue",
+        question: q,
+      });
+      setVqaResponse(resp);
+    } finally {
+      setVqaLoading(false);
+    }
+  };
 
   return (
     <aside className="lg:col-span-4 space-y-6">
@@ -150,6 +173,88 @@ export function VolumetricSidebar({
           >
             <span>Jump to slice 64 &amp; recenter viewports →</span>
           </button>
+        </div>
+
+        {/* Interactive Slice VQA Section */}
+        <div className="rounded-[2rem] bg-[#FDFCF8] border border-[#292524]/10 p-5 space-y-3.5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#88CCF1] animate-pulse" />
+              <h3 className="text-sm font-semibold text-[#292524]">
+                Targeted Slice VQA
+              </h3>
+            </div>
+            <span className="text-[11px] font-semibold text-[#78716C] bg-[#EFEDF4] px-2.5 py-0.5 rounded-full">
+              Slice {activeSlice} Q&amp;A
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              "Describe lesion on slice 64",
+              "Is there a fracture on this slice?",
+              "Check right upper lobe parenchyma",
+            ].map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => {
+                  setVqaQuestion(preset);
+                  handleAskVqa(preset);
+                }}
+                className="text-[10px] font-medium text-[#78716C] hover:text-[#292524] bg-white border border-[#292524]/10 px-2 py-1 rounded-full transition"
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={vqaQuestion}
+              onChange={(e) => setVqaQuestion(e.target.value)}
+              placeholder={`Ask MedGemma about slice ${activeSlice}...`}
+              className="flex-1 text-xs px-3.5 py-2 rounded-full border border-[#292524]/15 bg-white text-[#292524] placeholder:text-[#78716C]/60 focus:outline-none focus:border-[#292524]"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAskVqa();
+              }}
+            />
+            <button
+              type="button"
+              disabled={vqaLoading || !vqaQuestion.trim()}
+              onClick={() => handleAskVqa()}
+              className="px-4 py-2 rounded-full bg-[#292524] text-white text-xs font-semibold hover:bg-[#3f3f46] disabled:opacity-50 transition cursor-pointer"
+            >
+              {vqaLoading ? "..." : "Ask"}
+            </button>
+          </div>
+
+          {vqaResponse && (
+            <div className="rounded-[1.25rem] bg-[#EFEDF4]/70 p-3.5 space-y-2 border border-[#292524]/5">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="font-semibold text-[#292524]">AI Response:</span>
+                <span className="font-bold text-[#292524] bg-white px-2 py-0.5 rounded-full">
+                  {Math.round(vqaResponse.confidence_score * 100)}% conf
+                </span>
+              </div>
+              <p className="text-xs text-[#292524] leading-relaxed whitespace-pre-line">
+                {vqaResponse.answer_markdown}
+              </p>
+              {vqaResponse.relevant_anatomical_regions && vqaResponse.relevant_anatomical_regions.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {vqaResponse.relevant_anatomical_regions.map((reg) => (
+                    <span
+                      key={reg}
+                      className="text-[9px] font-semibold text-[#78716C] bg-white px-2 py-0.5 rounded-full"
+                    >
+                      {reg}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Secondary ROI Card */}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { generateLocalFallback, generateLocalHistogram } from "./api";
+import { generateLocalFallback, generateLocalHistogram, parseBoundingBox1000 } from "./api";
 
 describe("Volumetric API & Simulation Logic", () => {
   it("generates 48-bin attention histogram with normalized bounds", () => {
@@ -42,5 +42,17 @@ describe("Volumetric API & Simulation Logic", () => {
     expect(payload.scanner_telemetry.kvp).toBe(120);
     expect(payload.scanner_telemetry.kernel).toBe("B30f soft");
     expect(payload.primary_roi.meanHu).toBe(42);
+  });
+
+  it("converts [ymin, xmin, ymax, xmax] 1000-based boxes to canvas pixel coordinates", () => {
+    const box1000 = { ymin: 200, xmin: 300, ymax: 600, xmax: 800 };
+    const canvasWidth = 500;
+    const canvasHeight = 400;
+
+    const px = parseBoundingBox1000(box1000, canvasWidth, canvasHeight);
+    expect(px.left).toBe(150); // (300 / 1000) * 500
+    expect(px.top).toBe(80); // (200 / 1000) * 400
+    expect(px.width).toBe(250); // ((800 - 300) / 1000) * 500
+    expect(px.height).toBe(160); // ((600 - 200) / 1000) * 400
   });
 });

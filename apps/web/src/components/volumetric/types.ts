@@ -83,3 +83,46 @@ export interface ClusterStatus {
   is_live_backend?: boolean;
 }
 
+export interface NormalizedBox1000 {
+  ymin: number;
+  xmin: number;
+  ymax: number;
+  xmax: number;
+}
+
+export interface PixelBoundingBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface VisualGroundingAnnotation {
+  id: string;
+  slice_index: number;
+  label: string;
+  confidence: number;
+  box_1000: NormalizedBox1000;
+  anatomical_region: string;
+  finding_type: string;
+  mean_hu?: number;
+  dimensions_mm?: string;
+}
+
+export interface TargetedSliceVQARequest {
+  case_id?: string;
+  slice_index: number;
+  tissue_window: WindowPreset;
+  question: string;
+}
+
+export interface TargetedSliceVQAResponse {
+  slice_index: number;
+  question: string;
+  answer_markdown: string;
+  confidence_score: number;
+  grounded_box?: NormalizedBox1000 | null;
+  relevant_anatomical_regions?: string[];
+}
+
+

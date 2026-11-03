@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
-import { DiagnosticModality, WindowPreset } from "./types";
+import React, { useEffect, useRef, useState } from "react";
+import { fetchVisualGrounding } from "./api";
+import { DiagnosticModality, VisualGroundingAnnotation, WindowPreset } from "./types";
+import { VisualGroundingOverlay } from "./VisualGroundingOverlay";
 
 interface AxialViewportProps {
   slice: number;
@@ -23,8 +25,20 @@ export function AxialViewport({
   currentHuOrSignal,
 }: AxialViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [annotations, setAnnotations] = useState<VisualGroundingAnnotation[]>([]);
+  const [selectedAnnoId, setSelectedAnnoId] = useState<string | null>(null);
   const isMri = modality === "3d_mri";
   const roiTag = isMri ? "MRI-ROI-01" : "CT-ROI-01";
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchVisualGrounding("CASE-2026-0894", slice, modality).then((data) => {
+      if (isMounted) setAnnotations(data);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [slice, modality]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -152,6 +166,13 @@ export function AxialViewport({
           height={380}
           onClick={handleCanvasClick}
           className="w-full h-full block"
+        />
+        <VisualGroundingOverlay
+          annotations={annotations}
+          width={380}
+          height={380}
+          selectedId={selectedAnnoId}
+          onSelect={(anno) => setSelectedAnnoId(anno.id)}
         />
         <div className="absolute top-4 left-4 bg-[#FDFCF8]/90 backdrop-blur-sm px-3 py-1 rounded-full text-[11px] font-semibold text-[#292524] border border-[#FFB7B2] shadow-sm pointer-events-none">
           [{roiTag} • 14.2mm]

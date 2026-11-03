@@ -14,6 +14,24 @@ from app.services.ct_volume_pipeline import (
     generate_synthetic_3d_ct_volume,
     sample_sparse_attention_slices,
 )
+from app.schemas.ct_clinical import (
+    FreeFormRadiologyReport,
+    LongitudinalComparisonReport,
+    TargetedSliceVQARequest,
+    TargetedSliceVQAResponse,
+    VisualGroundingAnnotation,
+)
+from app.services.ct_report_generator import (
+    generate_narrative_radiology_report,
+    generate_longitudinal_comparison,
+)
+from app.services.fhir_exporter import build_fhir_r4_diagnostic_bundle
+from app.services.ct_classifiers import (
+    evaluate_lung_rads_v2022,
+    classify_ct_rate_abnormalities,
+)
+from app.services.targeted_slice_vqa import answer_targeted_slice_question
+from app.services.visual_grounding import get_slice_grounding_annotations
 
 router = APIRouter(prefix="/volumetric", tags=["volumetric"])
 ct_router = APIRouter(prefix="/ct", tags=["ct-volume"])
@@ -333,3 +351,130 @@ async def export_volumetric_manifest(
         "coordinate_system": "LPS (Head-First Supine)",
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
+
+
+# ============================================================================
+# Clinical Intelligence Endpoints (Reports, FHIR, Classifiers, VQA, Grounding)
+# ============================================================================
+
+@router.post("/reports/free-form", response_model=FreeFormRadiologyReport)
+@router.get("/reports/free-form", response_model=FreeFormRadiologyReport)
+async def get_free_form_radiology_report(
+    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    modality: Literal["3d_ct", "3d_mri"] = Query("3d_ct", description="Modality"),
+) -> FreeFormRadiologyReport:
+    """Generates comprehensive narrative RSNA radiology report with Findings & Impression."""
+    payload = _build_volumetric_payload(case_id=case_id, modality=modality, active_slice=64)
+    return generate_narrative_radiology_report(
+        case_id=case_id,
+        lesion_data={
+            "peak_slice": payload["primary_roi"]["location"],
+            "dimensions_str": payload["primary_roi"]["dimensions_str"],
+            "volume_cm3": payload["primary_roi"]["volume_cm3"],
+            "mean_hu": payload["primary_roi"]["mean_hu"],
+            "anatomical_location": payload["primary_roi"]["label"],
+        },
+        telemetry=payload["scanner_telemetry"],
+        comparison="Baseline volumetric CT scan",
+    )
+
+
+@router.post("/reports/longitudinal", response_model=LongitudinalComparisonReport)
+@router.get("/reports/longitudinal", response_model=LongitudinalComparisonReport)
+async def get_longitudinal_comparison_report(
+    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    prior_study_date: str = Query("2026-01-15", description="Prior CT date (YYYY-MM-DD)"),
+    current_study_date: str = Query("2026-04-20", description="Current CT date (YYYY-MM-DD)"),
+) -> LongitudinalComparisonReport:
+    """Quantifies longitudinal interval changes (RECIST 1.1) in lesion size, volume, and density."""
+    prior_study = {
+        "study_date": prior_study_date,
+        "lesion_longest_diameter_mm": 11.2,
+        "volume_cm3": 0.72,
+        "mean_hu": 38.0,
+    }
+    current_study = {
+        "study_date": current_study_date,
+        "lesion_longest_diameter_mm": 14.2,
+        "volume_cm3": 1.05,
+        "mean_hu": 42.0,
+    }
+    return generate_longitudinal_comparison(
+        case_id=case_id,
+        prior_study=prior_study,
+        current_study=current_study,
+    )
+
+
+@router.post("/fhir/diagnostic-bundle")
+@router.get("/fhir/diagnostic-bundle")
+async def get_fhir_diagnostic_bundle(
+    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    patient_id: str = Query("PAT-9842", description="Patient ID"),
+) -> dict[str, Any]:
+    """Generates an HL7 FHIR R4 Bundle containing DiagnosticReport and linked Observations."""
+    measurements = [
+        {"code": "24606-6", "display": "Nodule Long Axis Diameter", "value": 14.2, "unit": "mm"},
+        {"code": "volume", "display": "3D Lesion Volume", "value": 1.05, "unit": "cm3"},
+        {"code": "attenuation", "display": "Mean CT Attenuation", "value": 42.0, "unit": "[HU]"},
+    ]
+    return build_fhir_r4_diagnostic_bundle(
+        patient_id=patient_id,
+        case_id=case_id,
+        modality="CT",
+        narrative_impression="Focal hypodense nodular lesion in liver segment VII.",
+        measurements=measurements,
+        lung_rads_score="4A",
+    )
+
+
+@router.post("/classifications")
+@router.get("/classifications")
+async def get_diagnostic_classifications(
+    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    diameter_mm: float = Query(9.5, description="Nodule diameter (mm)"),
+) -> dict[str, Any]:
+    """Outputs Lung-RADS v2022 score and CT-RATE 18 multi-organ abnormality probabilities."""
+    lung_rads = evaluate_lung_rads_v2022(diameter_mm=diameter_mm, nodule_type="solid")
+    ct_rate = classify_ct_rate_abnormalities(
+        primary_roi_label="Segment VII hypodense lesion",
+        mean_hu=42.0,
+        volume_cm3=1.05,
+    )
+    return {
+        "case_id": case_id,
+        "lung_rads": lung_rads.model_dump(),
+        "ct_rate_abnormalities": ct_rate.model_dump(),
+        "detected_conditions": ct_rate.present_conditions(threshold=0.5),
+    }
+
+
+@router.post("/vqa", response_model=TargetedSliceVQAResponse)
+@router.get("/vqa", response_model=TargetedSliceVQAResponse)
+async def query_targeted_slice_vqa(
+    payload: TargetedSliceVQARequest | None = None,
+    case_id: str = Query("CASE-2026-0894"),
+    slice_index: int = Query(64, ge=1, le=512),
+    tissue_window: Literal["soft_tissue", "lung", "bone", "liver", "mediastinum"] = Query("soft_tissue"),
+    question: str = Query("Describe the lesion on slice 64"),
+) -> TargetedSliceVQAResponse:
+    """Answers clinical natural language visual question answering for a specific axial slice."""
+    if payload is None:
+        payload = TargetedSliceVQARequest(
+            case_id=case_id,
+            slice_index=slice_index,
+            tissue_window=tissue_window,
+            question=question,
+        )
+    return answer_targeted_slice_question(payload)
+
+
+@router.get("/grounding", response_model=list[VisualGroundingAnnotation])
+async def get_slice_visual_grounding(
+    case_id: str = Query("CASE-2026-0894", description="Case ID"),
+    slice_index: int = Query(64, ge=1, le=512, description="Axial slice index"),
+    modality: Literal["3d_ct", "3d_mri"] = Query("3d_ct"),
+) -> list[VisualGroundingAnnotation]:
+    """Retrieves spatial bounding boxes [ymin, xmin, ymax, xmax] for an axial CT/MRI slice."""
+    return get_slice_grounding_annotations(case_id=case_id, slice_index=slice_index, modality=modality)
+
