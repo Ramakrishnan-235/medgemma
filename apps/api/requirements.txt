@@ -23,3 +23,5 @@ pyjwt[crypto]>=2.8.0
 python-multipart>=0.0.9
 pydicom>=3.0.0
 reportlab>=4.2.2
+openai>=1.14.0
+SimpleITK>=2.3.1

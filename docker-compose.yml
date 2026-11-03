@@ -1,155 +1,49 @@
+version: "3.8"
+
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: medgemma-postgres
-    restart: unless-stopped
-    env_file: .env
+  # 1. MedGemma 1.5 Serving Engine (High-throughput VLM server)
+  medgemma-engine:
+    image: vllm/vllm-openai:latest
+    container_name: medgemma-vllm
+    ipc: host
     ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7-alpine
-    container_name: medgemma-redis
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  minio:
-    image: minio/minio:latest
-    container_name: medgemma-minio
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
+      - "8001:8000"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
     volumes:
-      - miniodata:/data
-
-  api:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
-    container_name: medgemma-api
-    restart: unless-stopped
-    env_file: .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./apps/api:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_started
-
-  worker:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
-    container_name: medgemma-worker
-    restart: unless-stopped
-    env_file: .env
-    # Separate queues: interactive (Q&A, single X-ray) vs bulk (PDF OCR, EHR ingestion)
-    command: celery -A app.workers.celery_app worker -Q interactive,bulk -c 2 --loglevel=info
-    volumes:
-      - ./apps/api:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  outbox-relay:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
-    container_name: medgemma-outbox-relay
-    restart: unless-stopped
-    env_file: .env
-    command: python -m app.workers.outbox_relay
-    volumes:
-      - ./apps/api:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  gpu-service:
-    build:
-      context: ./apps/gpu-service
-      dockerfile: Dockerfile.gpu
-    container_name: medgemma-gpu
-    restart: unless-stopped
-    env_file: .env
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./apps/gpu-service:/app
-      - hf_cache:/root/.cache/huggingface
+      # Cache HuggingFace weights on host so they aren't redownloaded
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    command: >
+      serve google/medgemma-1.5-4b
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 131072
+      --limit-mm-per-prompt '{"image": 64}'
+      --trust-remote-code
+      --dtype bfloat16
+      --gpu-memory-utilization 0.85
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
+    restart: unless-stopped
 
-  web:
+  # 2. Medical Backend & DICOM Processing Engine
+  ct-backend:
     build:
-      context: ./apps/web
-      dockerfile: Dockerfile
-    container_name: medgemma-web
-    restart: unless-stopped
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: ct-backend-api
     ports:
-      - "3000:3000"
+      - "8000:8000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      - MEDGEMMA_BASE_URL=http://medgemma-engine:8000/v1
     volumes:
-      - ./apps/web:/app
-      - /app/node_modules
+      - ./data/uploads:/app/data/uploads
+      - ./data/outputs:/app/data/outputs
     depends_on:
-      - api
-
-  caddy:
-    image: caddy:2-alpine
-    container_name: medgemma-caddy
+      - medgemma-engine
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-    depends_on:
-      - web
-      - api
-
-volumes:
-  pgdata:
-  redisdata:
-  miniodata:
-  hf_cache:
-  caddy_data:

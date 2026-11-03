@@ -311,8 +311,9 @@ class TestSecurityPosture(unittest.TestCase):
     # =========================================================================
     def test_docker_compose_port_bindings_and_redis_auth(self):
         """Verify Docker Compose port bindings on 0.0.0.0 and missing Redis password (SEC-06)."""
-        compose_path = os.path.join(REPO_ROOT, "docker-compose.yml")
-        self.assertTrue(os.path.exists(compose_path), "docker-compose.yml must exist")
+        full_compose = os.path.join(REPO_ROOT, "docker-compose.full.yml")
+        compose_path = full_compose if os.path.exists(full_compose) else os.path.join(REPO_ROOT, "docker-compose.yml")
+        self.assertTrue(os.path.exists(compose_path), "docker-compose file must exist")
 
         with open(compose_path, "r", encoding="utf-8") as f:
             compose_text = f.read()

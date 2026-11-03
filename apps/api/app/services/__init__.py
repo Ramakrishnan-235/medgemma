@@ -24,11 +24,20 @@ from app.services.hybrid_retrieval import (
     evaluate_retrieval_predictions,
     retrieve_case_evidence_hybrid_rrf,
 )
+from app.services.medgemma_service import DockerizedMedGemmaService
 from app.services.volumetric_extension import (
     SampledVolumetricSlab,
     VolumetricModality,
     VolumetricSeriesAdapter,
     VolumetricSeriesDescriptor,
+)
+from app.services.ct_volume_pipeline import (
+    generate_synthetic_3d_ct_volume,
+    compute_3d_quantification,
+    compute_z_axis_attention_scores,
+    sample_sparse_attention_slices,
+    window_to_rgb,
+    main as run_ct_volume_pipeline,
 )
 
 __all__ = [
@@ -49,9 +58,16 @@ __all__ = [
     "retrieve_case_evidence_hybrid_rrf",
     "evaluate_retrieval_predictions",
     "RetrievalEvalMetrics",
+    "DockerizedMedGemmaService",
     "VolumetricModality",
     "VolumetricSeriesDescriptor",
     "SampledVolumetricSlab",
     "VolumetricSeriesAdapter",
+    "generate_synthetic_3d_ct_volume",
+    "compute_3d_quantification",
+    "compute_z_axis_attention_scores",
+    "sample_sparse_attention_slices",
+    "window_to_rgb",
+    "run_ct_volume_pipeline",
 ]
 
