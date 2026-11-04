@@ -17,9 +17,9 @@ const reenieBeanie = Reenie_Beanie({
 });
 
 export const metadata: Metadata = {
-  title: "MedGemma 1.5 — 3D Volumetric MRI & CT Diagnostic Workspace",
+  title: "MedGemma RadStudio — STATION-04 HRCT",
   description:
-    "Calm volumetric clarity for multi-sequence 3D MRI & CT diagnostics with sparse z-axis attention and MedGemma 1.5 reasoning.",
+    "Next-generation clinical radiology workstation for multi-slice CT/MPR diagnosis, automated Lung-RADS assessment, and real-time report synthesis.",
 };
 
 export default function RootLayout({
@@ -32,7 +32,7 @@ export default function RootLayout({
       lang="en"
       className={`${outfit.variable} ${reenieBeanie.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans bg-[#FDFCF8] text-[#292524] selection:bg-[#FFB7B2]/40 selection:text-[#292524]">
+      <body className="h-full w-full overflow-hidden font-sans bg-[#F3F4F6] text-[#1E293B]">
         <QueryProvider>{children}</QueryProvider>
       </body>
     </html>

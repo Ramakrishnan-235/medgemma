@@ -14,6 +14,8 @@ declare module "bun:test" {
     toBeUndefined: () => void;
     toBeTruthy: () => void;
     toBeFalsy: () => void;
+    toContain: (expected: string) => void;
+    toBeCloseTo: (expected: number, numDigits?: number) => void;
   };
   export const beforeEach: (fn: () => void | Promise<void>) => void;
   export const afterEach: (fn: () => void | Promise<void>) => void;
