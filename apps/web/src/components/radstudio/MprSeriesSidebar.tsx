@@ -1,12 +1,15 @@
 "use client";
 
 import React from "react";
-import type { SeriesType } from "./types";
+import type { SeriesType, DicomSeriesDataset } from "./types";
 
 interface MprSeriesSidebarProps {
   currentSeries: SeriesType;
   onSelectSeries: (series: SeriesType) => void;
+  onOpenUploadModal?: () => void;
   onToast: (msg: string) => void;
+  hasStudy?: boolean;
+  activeDataset?: DicomSeriesDataset | null;
 }
 
 interface SeriesItemDef {
@@ -22,41 +25,45 @@ interface SeriesItemDef {
 export function MprSeriesSidebar({
   currentSeries,
   onSelectSeries,
+  onOpenUploadModal,
   onToast,
+  hasStudy = false,
+  activeDataset,
 }: MprSeriesSidebarProps) {
+  const numSlices = activeDataset?.numSlices || 128;
   const seriesList: SeriesItemDef[] = [
     {
       id: "axial",
-      seriesNumber: "Series 04",
-      title: "Axial 1.0mm",
-      slicesBadge: "128 Slices",
-      tag: "LUNG",
-      specs: "1.0mm Thin • B60f Sharp",
+      seriesNumber: "Series 01",
+      title: activeDataset?.seriesDescription || "Axial CT",
+      slicesBadge: `${numSlices} Slices`,
+      tag: "AXIAL",
+      specs: `${activeDataset?.slices[0]?.sliceThickness || 1.0}mm • ${activeDataset?.reconKernel || "B60f Sharp"}`,
       isActiveDefault: true,
     },
     {
       id: "coronal",
       seriesNumber: "Series 02",
       title: "Coronal MPR",
-      slicesBadge: "86 Slices",
-      tag: "2.0mm",
-      specs: "Reconstructed coronal scout",
+      slicesBadge: "Scout MPR",
+      tag: "CORONAL",
+      specs: "Multiplanar reconstruction",
     },
     {
       id: "sagittal",
       seriesNumber: "Series 03",
       title: "Sagittal MPR",
-      slicesBadge: "54 Slices",
-      tag: "2.0mm",
-      specs: "Right lateral apex projection",
+      slicesBadge: "Sagittal MPR",
+      tag: "SAGITTAL",
+      specs: "Orthogonal lateral view",
     },
     {
       id: "mip",
-      seriesNumber: "Series 05",
+      seriesNumber: "Series 04",
       title: "Max Intensity Proj",
       slicesBadge: "MIP 10mm",
-      tag: "10mm",
-      specs: "Vascular arborization review",
+      tag: "MIP",
+      specs: "Vascular review",
     },
   ];
 
@@ -82,12 +89,40 @@ export function MprSeriesSidebar({
             MPR & SERIES
           </span>
         </div>
-        <span className="text-[11px] font-medium text-gray-400">5 Series</span>
+        <button
+          onClick={onOpenUploadModal}
+          title="Upload DICOM series"
+          className="text-[10px] font-semibold text-gray-700 hover:text-black bg-gray-200/70 hover:bg-gray-200 px-2 py-0.5 rounded cursor-pointer transition-colors"
+        >
+          + Upload
+        </button>
       </div>
 
       {/* Cards List */}
       <div className="p-2.5 space-y-3">
-        {seriesList.map((item) => {
+        {!hasStudy ? (
+          <div className="p-4 rounded-xl border border-dashed border-gray-300 bg-white/80 text-center space-y-3 shadow-2xs">
+            <div className="w-10 h-10 rounded-full bg-gray-100 text-gray-500 mx-auto flex items-center justify-center">
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="3" width="20" height="18" rx="2" />
+                <path d="M7 3v18M17 3v18M2 12h20" />
+              </svg>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-gray-900">No Series Loaded</p>
+              <p className="text-[11px] text-gray-500 leading-tight">
+                Upload a DICOM CT study to view Axial, Coronal, Sagittal & MIP reconstructions.
+              </p>
+            </div>
+            <button
+              onClick={onOpenUploadModal}
+              className="w-full py-1.5 px-2 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded-lg shadow-xs transition-all cursor-pointer"
+            >
+              + Upload DICOM
+            </button>
+          </div>
+        ) : (
+          seriesList.map((item) => {
           const isActive = currentSeries === item.id;
           return (
             <div
@@ -236,7 +271,7 @@ export function MprSeriesSidebar({
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
     </aside>
   );

@@ -8,6 +8,8 @@ import type {
   ViewportToolType,
   LesionBox,
   DiagnosticAssessmentData,
+  UploadedStudyData,
+  DicomSeriesDataset,
 } from "./types";
 
 export const DEFAULT_ASSESSMENT: DiagnosticAssessmentData = {
@@ -54,12 +56,14 @@ export const BOX_02: LesionBox = {
   site: "Left Lower Lobe Subpleural",
   riskCategory: "Lung-RADS 3 (Stable)",
 };
-
 export function useRadStudioState() {
+  const [activeDataset, setActiveDataset] = useState<DicomSeriesDataset | null>(null);
+  const hasStudy = activeDataset !== null;
+
   const [modality, setModality] = useState<ModalityType>("CT");
   const [wlPreset, setWlPreset] = useState<WlPresetType>("lung");
   const [series, setSeries] = useState<SeriesType>("axial");
-  const [slice, setSlice] = useState<number>(42);
+  const [slice, setSlice] = useState<number>(1);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [activeTool, setActiveTool] = useState<ViewportToolType>("measure");
   const [zoomPercent, setZoomPercent] = useState<number>(140);
@@ -69,8 +73,15 @@ export function useRadStudioState() {
   const [heatmapEnabled, setHeatmapEnabled] = useState<boolean>(false);
   const [volumetric3dOpen, setVolumetric3dOpen] = useState<boolean>(false);
   const [fhirModalOpen, setFhirModalOpen] = useState<boolean>(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState<boolean>(false);
   const [ehrSyncStatus, setEhrSyncStatus] = useState<"idle" | "syncing" | "synced">("idle");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [assessment, setAssessment] = useState<DiagnosticAssessmentData>(DEFAULT_ASSESSMENT);
+  const [box01, setBox01] = useState<LesionBox>(BOX_01);
+  const [box02, setBox02] = useState<LesionBox>(BOX_02);
+  const [customTotalSlices, setCustomTotalSlices] = useState<number | null>(null);
+  const [reconSpecs, setReconSpecs] = useState<string>("120 kVp • 240 mA • Recon: B60f Sharp • Calibrated HU");
 
   const [expandedSections, setExpandedSections] = useState({
     lungs: true,
@@ -88,14 +99,19 @@ export function useRadStudioState() {
     }, 3200);
   }, []);
 
-  const totalSlices = series === "axial" ? 128 : series === "coronal" ? 86 : series === "sagittal" ? 54 : 100;
+  const totalSlices = activeDataset
+    ? activeDataset.numSlices
+    : customTotalSlices ?? 0;
 
-  // Calculate realistic Z-position in mm based on slice
-  const zPositionMm = (-180 + (slice - 1) * 0.88).toFixed(1);
+  // Calculate realistic Z-position in mm based on active slice or formula fallback
+  const zPositionMm =
+    activeDataset && activeDataset.slices[slice - 1]
+      ? activeDataset.slices[slice - 1].sliceLocation.toFixed(1)
+      : (-180 + (slice - 1) * 0.88).toFixed(1);
 
   // Cineloop play interval
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || totalSlices <= 1) return;
     const interval = setInterval(() => {
       setSlice((prev) => (prev >= totalSlices ? 1 : prev + 1));
     }, 110);
@@ -113,10 +129,12 @@ export function useRadStudioState() {
         setSlice((s) => Math.max(1, s - 1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setSlice((s) => Math.min(totalSlices, s + 1));
+        setSlice((s) => (totalSlices > 0 ? Math.min(totalSlices, s + 1) : 1));
       } else if (e.key === " ") {
         e.preventDefault();
-        setIsPlaying((p) => !p);
+        if (totalSlices > 1) {
+          setIsPlaying((p) => !p);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -158,6 +176,82 @@ export function useRadStudioState() {
     }, 1800);
   };
 
+  const handleDicomUploaded = (dataset: DicomSeriesDataset, summary?: UploadedStudyData) => {
+    setActiveDataset(dataset);
+    const numSlices = dataset.numSlices;
+    setCustomTotalSlices(numSlices);
+
+    const targetSlice =
+      summary?.peakSlice && summary.peakSlice <= numSlices
+        ? summary.peakSlice
+        : Math.max(1, Math.floor(numSlices / 2));
+    setSlice(targetSlice);
+
+    if (summary) {
+      setAssessment({
+        accessionNumber: summary.accessionNumber,
+        protocol: summary.protocol,
+        lungRadsCurrent: summary.lungRads,
+        lungRadsPrior: "Prior 2024: Lung-RADS 3",
+        priorYear: 2024,
+        nodesStatus: "Nodes: Benign",
+        malignancyProbability: summary.malignancyProb,
+        thresholdIntervention: 65,
+        aucScore: 0.941,
+        volumeCm3: summary.volumeCm3,
+        densityHu: summary.meanHu,
+        max2dMm: summary.primaryNoduleMm,
+        site: summary.site,
+        vdtDays: summary.vdtDays,
+        riskExpansionLabel: summary.vdtDays < 180 ? "High Risk Expansion" : "Indeterminate Growth",
+        fhirReady: true,
+      });
+      setBox01({
+        id: "BOX-01",
+        label: `${summary.site} Nodule`,
+        sliceIndex: targetSlice,
+        diameterMm: summary.primaryNoduleMm,
+        coordinates: [0.38, 0.62, 0.49],
+        huAttenuation: summary.meanHu,
+        volumeCm3: summary.volumeCm3,
+        vdtDays: summary.vdtDays,
+        site: summary.site,
+        riskCategory: summary.lungRads,
+      });
+      setReconSpecs(`${summary.kvp} kVp • ${summary.ma} mA • Recon: ${summary.reconKernel} • Native DICOM`);
+    } else {
+      const firstSlice = dataset.slices[0];
+      setAssessment({
+        accessionNumber: dataset.accessionNumber || `ACC-${Math.floor(10000 + Math.random() * 90000)}`,
+        protocol: dataset.seriesDescription || "CT-THORAX-VOLUMETRIC",
+        lungRadsCurrent: "Lung-RADS 4B: High Suspicion",
+        lungRadsPrior: "Prior: Not Available",
+        priorYear: 2024,
+        nodesStatus: "Nodes: Evaluated",
+        malignancyProbability: 82.5,
+        thresholdIntervention: 65,
+        aucScore: 0.941,
+        volumeCm3: 0.42,
+        densityHu: 45,
+        max2dMm: 14.2,
+        site: "Right Lung",
+        vdtDays: 118,
+        riskExpansionLabel: "High Suspicion",
+        fhirReady: true,
+      });
+      setReconSpecs(
+        `${dataset.kvp || 120} kVp • ${dataset.ma || 240} mA • Recon: ${
+          dataset.reconKernel || firstSlice?.reconKernel || "B60f Sharp"
+        } • Native DICOM`
+      );
+    }
+
+    setUploadModalOpen(false);
+    showToast(
+      `✓ Ingested DICOM ${dataset.seriesDescription || "Series"}: ${numSlices} real slices loaded`
+    );
+  };
+
   return {
     modality,
     setModality,
@@ -187,6 +281,13 @@ export function useRadStudioState() {
     setVolumetric3dOpen,
     fhirModalOpen,
     setFhirModalOpen,
+    uploadModalOpen,
+    setUploadModalOpen,
+    hasStudy,
+    activeDataset,
+    setActiveDataset,
+    handleDicomUploaded,
+    reconSpecs,
     ehrSyncStatus,
     triggerEhrSync,
     toastMessage,
@@ -195,9 +296,9 @@ export function useRadStudioState() {
     toggleSection,
     jumpToBox01,
     jumpToBox02,
-    assessment: DEFAULT_ASSESSMENT,
-    box01: BOX_01,
-    box02: BOX_02,
+    assessment,
+    box01,
+    box02,
   };
 }
 

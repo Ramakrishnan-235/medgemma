@@ -9,6 +9,7 @@ import { DiagnosticAssessmentPanel } from "@/components/radstudio/DiagnosticAsse
 import { DiagnosticReportPanel } from "@/components/radstudio/DiagnosticReportPanel";
 import { FhirModal } from "@/components/radstudio/FhirModal";
 import { VolumetricModal3D } from "@/components/radstudio/VolumetricModal3D";
+import { DicomUploadModal } from "@/components/radstudio/DicomUploadModal";
 import { RadStudioToast } from "@/components/radstudio/RadStudioToast";
 import { useRadStudioState } from "@/components/radstudio/use-radstudio-state";
 
@@ -21,7 +22,10 @@ export default function MedGemmaRadStudioPage() {
       <RadStudioHeader
         modality={state.modality}
         setModality={state.setModality}
+        onOpenUploadModal={() => state.setUploadModalOpen(true)}
         onToast={state.showToast}
+        hasStudy={state.hasStudy}
+        activeDataset={state.activeDataset}
       />
 
       {/* Main 4-Column Workstation Layout */}
@@ -33,11 +37,18 @@ export default function MedGemmaRadStudioPage() {
         <MprSeriesSidebar
           currentSeries={state.series}
           onSelectSeries={state.setSeries}
+          onOpenUploadModal={() => state.setUploadModalOpen(true)}
           onToast={state.showToast}
+          hasStudy={state.hasStudy}
+          activeDataset={state.activeDataset}
         />
 
         {/* Column 2: Central Medical CT Viewport */}
         <CtViewport
+          activeDataset={state.activeDataset}
+          hasStudy={state.hasStudy}
+          onOpenUploadModal={() => state.setUploadModalOpen(true)}
+          onDicomUploadSuccess={state.handleDicomUploaded}
           series={state.series}
           slice={state.slice}
           totalSlices={state.totalSlices}
@@ -61,6 +72,7 @@ export default function MedGemmaRadStudioPage() {
           setHeatmapEnabled={state.setHeatmapEnabled}
           onOpen3dView={() => state.setVolumetric3dOpen(true)}
           onToast={state.showToast}
+          reconSpecs={state.reconSpecs}
           box01={state.box01}
           box02={state.box02}
         />
@@ -77,6 +89,8 @@ export default function MedGemmaRadStudioPage() {
             onSyncEhr={state.triggerEhrSync}
             ehrSyncStatus={state.ehrSyncStatus}
             onToast={state.showToast}
+            hasStudy={state.hasStudy}
+            onOpenUploadModal={() => state.setUploadModalOpen(true)}
           />
 
           {/* Diagnostic Report Card */}
@@ -86,6 +100,7 @@ export default function MedGemmaRadStudioPage() {
             onJumpBox01={state.jumpToBox01}
             onJumpBox02={state.jumpToBox02}
             currentSlice={state.slice}
+            hasStudy={state.hasStudy}
           />
         </section>
       </main>
@@ -104,6 +119,14 @@ export default function MedGemmaRadStudioPage() {
         isOpen={state.volumetric3dOpen}
         onClose={() => state.setVolumetric3dOpen(false)}
         box01={state.box01}
+        onToast={state.showToast}
+      />
+
+      {/* DICOM Upload & Ingestion Modal */}
+      <DicomUploadModal
+        isOpen={state.uploadModalOpen}
+        onClose={() => state.setUploadModalOpen(false)}
+        onUploadSuccess={state.handleDicomUploaded}
         onToast={state.showToast}
       />
 

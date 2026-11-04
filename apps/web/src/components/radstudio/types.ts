@@ -54,3 +54,60 @@ export interface DiagnosticAssessmentData {
   fhirReady: boolean;
 }
 
+export interface UploadedStudyData {
+  fileName: string;
+  fileCount: number;
+  accessionNumber: string;
+  protocol: string;
+  numSlices: number;
+  sliceThicknessMm: number;
+  kvp: number;
+  ma: number;
+  reconKernel: string;
+  lungRads: string;
+  malignancyProb: number;
+  primaryNoduleMm: number;
+  peakSlice: number;
+  volumeCm3: number;
+  meanHu: number;
+  vdtDays: number;
+  site: string;
+}
+
+export interface DicomSlice {
+  sliceIndex: number; // 1-based (1..numSlices)
+  instanceNumber: number;
+  sliceLocation: number; // Z-coordinate in mm
+  rows: number;
+  cols: number;
+  pixelData: Int16Array | Uint16Array;
+  rescaleSlope: number;
+  rescaleIntercept: number;
+  windowCenter: number;
+  windowWidth: number;
+  pixelSpacing?: [number, number];
+  sliceThickness?: number;
+  sopInstanceUid: string;
+  seriesInstanceUid?: string;
+  studyInstanceUid?: string;
+  modality?: string;
+  seriesDescription?: string;
+  reconKernel?: string;
+  patientName?: string;
+}
+
+export interface DicomSeriesDataset {
+  seriesInstanceUid: string;
+  seriesDescription: string;
+  modality: string;
+  numSlices: number;
+  slices: DicomSlice[]; // Sorted ascending by sliceLocation
+  reconKernel?: string;
+  patientName?: string;
+  studyInstanceUid?: string;
+  kvp?: number;
+  ma?: number;
+  accessionNumber?: string;
+}
+
+

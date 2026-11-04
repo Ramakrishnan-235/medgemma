@@ -9,6 +9,8 @@ interface DiagnosticAssessmentPanelProps {
   onSyncEhr: () => void;
   ehrSyncStatus: "idle" | "syncing" | "synced";
   onToast: (msg: string) => void;
+  hasStudy?: boolean;
+  onOpenUploadModal?: () => void;
 }
 
 export function DiagnosticAssessmentPanel({
@@ -17,7 +19,46 @@ export function DiagnosticAssessmentPanel({
   onSyncEhr,
   ehrSyncStatus,
   onToast,
+  hasStudy = false,
+  onOpenUploadModal,
 }: DiagnosticAssessmentPanelProps) {
+  if (!hasStudy) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200/90 p-4 shadow-2xs space-y-3 select-none">
+        <div className="flex items-center justify-between pb-1 border-b border-gray-100">
+          <h2 className="text-xs font-bold text-gray-900 tracking-tight">
+            Diagnostic Assessment
+          </h2>
+          <span className="text-[10px] font-mono text-gray-400 font-medium">
+            Awaiting Ingestion
+          </span>
+        </div>
+        <div className="text-center py-4 space-y-2.5">
+          <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 mx-auto flex items-center justify-center">
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 0 1 0-16z" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-bold text-gray-800">No DICOM Study Loaded</p>
+            <p className="text-[11px] text-gray-500 leading-relaxed max-w-xs mx-auto">
+              Upload a thoracic CT DICOM series to trigger MedGemma 1.5 automated nodule detection, risk stratification, and Lung-RADS assessment.
+            </p>
+          </div>
+          {onOpenUploadModal && (
+            <button
+              onClick={onOpenUploadModal}
+              className="px-3 py-1.5 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded-lg shadow-xs transition-all cursor-pointer"
+            >
+              + Upload DICOM
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="bg-white rounded-xl border border-gray-200/90 p-3.5 shadow-2xs space-y-3 select-none">
       {/* Header */}

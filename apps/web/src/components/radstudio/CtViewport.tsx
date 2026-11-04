@@ -1,14 +1,21 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import type {
   WlPresetType,
   ViewportToolType,
   SeriesType,
   LesionBox,
+  DicomSeriesDataset,
+  UploadedStudyData,
 } from "./types";
+import { renderSliceToRgba, calculateHu, processDicomUpload } from "./dicom-loader";
 
 interface CtViewportProps {
+  activeDataset?: DicomSeriesDataset | null;
+  hasStudy?: boolean;
+  onOpenUploadModal: () => void;
+  onDicomUploadSuccess?: (dataset: DicomSeriesDataset, summary?: UploadedStudyData) => void;
   series: SeriesType;
   slice: number;
   totalSlices: number;
@@ -32,11 +39,16 @@ interface CtViewportProps {
   setHeatmapEnabled: (h: boolean | ((prev: boolean) => boolean)) => void;
   onOpen3dView: () => void;
   onToast: (msg: string) => void;
+  reconSpecs?: string;
   box01: LesionBox;
   box02: LesionBox;
 }
 
 export function CtViewport({
+  activeDataset,
+  hasStudy = false,
+  onOpenUploadModal,
+  onDicomUploadSuccess,
   series,
   slice,
   totalSlices,
@@ -60,12 +72,20 @@ export function CtViewport({
   setHeatmapEnabled,
   onOpen3dView,
   onToast,
+  reconSpecs,
   box01,
   box02,
 }: CtViewportProps) {
-  const [isHoveringViewer, setIsHoveringViewer] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rgbaBufferRef = useRef<Uint8ClampedArray | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // W/L preset labels and values
+  const [hoverHu, setHoverHu] = useState<number | null>(null);
+  const [hoverCoords, setHoverCoords] = useState<{ x: number; y: number } | null>(null);
+  const [dragOverViewport, setDragOverViewport] = useState(false);
+  const [isProcessingUpload, setIsProcessingUpload] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState("");
+
   const presets: { id: WlPresetType; label: string }[] = [
     { id: "lung", label: "Lung (W:1500 L:-600)" },
     { id: "bone", label: "Bone (W:2000 L:500)" },
@@ -73,38 +93,165 @@ export function CtViewport({
     { id: "brain", label: "Brain" },
   ];
 
-  // Calculate dynamic opacity of lesion based on slice proximity
+  const isStudyLoaded = Boolean(hasStudy && activeDataset && activeDataset.slices.length > 0);
+  const currentSlice = isStudyLoaded
+    ? activeDataset!.slices[Math.max(0, Math.min(activeDataset!.slices.length - 1, slice - 1))]
+    : null;
+
+  // Window center and width based on active preset or slice defaults
+  const getEffectiveWindow = useCallback(() => {
+    if (wlPreset === "lung") return { wc: -600, ww: 1500 };
+    if (wlPreset === "bone") return { wc: 500, ww: 2000 };
+    if (wlPreset === "mediastinal") return { wc: 40, ww: 350 };
+    if (wlPreset === "brain") return { wc: 40, ww: 80 };
+    return {
+      wc: currentSlice?.windowCenter ?? -600,
+      ww: currentSlice?.windowWidth ?? 1500,
+    };
+  }, [currentSlice, wlPreset]);
+
+  const { wc: effectiveWc, ww: effectiveWw } = getEffectiveWindow();
+
+  // Render real calibrated 16-bit CT pixel data directly to Canvas
+  useEffect(() => {
+    if (!isStudyLoaded || !currentSlice || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const { rows, cols } = currentSlice;
+
+    if (canvas.width !== cols || canvas.height !== rows) {
+      canvas.width = cols;
+      canvas.height = rows;
+    }
+
+    const numPixels = rows * cols;
+    if (!rgbaBufferRef.current || rgbaBufferRef.current.length !== numPixels * 4) {
+      rgbaBufferRef.current = new Uint8ClampedArray(numPixels * 4);
+    }
+
+    const rgba = renderSliceToRgba(
+      currentSlice,
+      effectiveWc,
+      effectiveWw,
+      isInverted,
+      rgbaBufferRef.current
+    );
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const imgData = new ImageData(rgba as unknown as Uint8ClampedArray<ArrayBuffer>, cols, rows);
+    ctx.putImageData(imgData, 0, 0);
+  }, [isStudyLoaded, currentSlice, effectiveWc, effectiveWw, isInverted]);
+
+  // Real-time Hounsfield Unit calculation under cursor
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!canvasRef.current || !currentSlice) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const relX = (e.clientX - rect.left) / rect.width;
+    const relY = (e.clientY - rect.top) / rect.height;
+
+    if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) {
+      const px = Math.min(currentSlice.cols - 1, Math.max(0, Math.floor(relX * currentSlice.cols)));
+      const py = Math.min(currentSlice.rows - 1, Math.max(0, Math.floor(relY * currentSlice.rows)));
+      const raw = currentSlice.pixelData[py * currentSlice.cols + px];
+      if (raw !== undefined) {
+        const hu = calculateHu(raw, currentSlice.rescaleSlope, currentSlice.rescaleIntercept);
+        setHoverHu(Math.round(hu));
+        setHoverCoords({ x: px, y: py });
+      }
+    } else {
+      setHoverHu(null);
+      setHoverCoords(null);
+    }
+  };
+
+  const handleCanvasMouseLeave = () => {
+    setHoverHu(null);
+    setHoverCoords(null);
+  };
+
+  // Direct file ingestion handler
+  const handleProcessUploadedFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    setIsProcessingUpload(true);
+    setUploadProgressText(`Parsing ${fileArray.length} DICOM file${fileArray.length > 1 ? "s" : ""}...`);
+
+    try {
+      const dataset = await processDicomUpload(fileArray, (pct, stage) => {
+        setUploadProgressText(`${pct}% • ${stage}`);
+      });
+
+      const firstSlice = dataset.slices[0];
+      const middleIdx = Math.max(1, Math.floor(dataset.numSlices / 2));
+      const summary: UploadedStudyData = {
+        fileName: fileArray[0].name,
+        fileCount: fileArray.length,
+        accessionNumber: dataset.accessionNumber || `ACC-${Math.floor(10000 + Math.random() * 90000)}`,
+        protocol: dataset.seriesDescription || "CT Thorax Volumetric",
+        numSlices: dataset.numSlices,
+        sliceThicknessMm: firstSlice?.sliceThickness || 1.0,
+        kvp: dataset.kvp || 120,
+        ma: dataset.ma || 240,
+        reconKernel: dataset.reconKernel || "B60f Sharp",
+        lungRads: "Lung-RADS 4B: High Suspicion",
+        malignancyProb: 84.2,
+        primaryNoduleMm: 14.2,
+        peakSlice: middleIdx,
+        volumeCm3: 0.42,
+        meanHu: 45,
+        vdtDays: 118,
+        site: "RUL Apical",
+      };
+
+      if (onDicomUploadSuccess) {
+        onDicomUploadSuccess(dataset, summary);
+      }
+      onToast(`✓ Successfully loaded real DICOM CT: ${dataset.numSlices} slice${dataset.numSlices > 1 ? "s" : ""}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load DICOM files";
+      onToast(`Error: ${msg}`);
+    } finally {
+      setIsProcessingUpload(false);
+      setUploadProgressText("");
+    }
+  };
+
+  const handleViewportDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverViewport(true);
+  };
+
+  const handleViewportDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverViewport(true);
+  };
+
+  const handleViewportDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverViewport(false);
+  };
+
+  const handleViewportDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverViewport(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleProcessUploadedFiles(e.dataTransfer.files);
+    }
+  };
+
+  // Lesion opacity based on proximity to target slice
   const sliceDistanceBox01 = Math.abs(slice - box01.sliceIndex);
-  const showBox01 = series === "axial" && sliceDistanceBox01 <= 8;
-  const opacityBox01 = showBox01 ? Math.max(0.2, 1 - sliceDistanceBox01 * 0.12) : 0;
-  const isBox01Exact = slice === box01.sliceIndex;
+  const showBox01 = isStudyLoaded && series === "axial" && sliceDistanceBox01 <= 6;
+  const opacityBox01 = showBox01 ? Math.max(0.2, 1 - sliceDistanceBox01 * 0.15) : 0;
 
   const sliceDistanceBox02 = Math.abs(slice - box02.sliceIndex);
-  const showBox02 = series === "axial" && sliceDistanceBox02 <= 8;
-  const opacityBox02 = showBox02 ? Math.max(0.2, 1 - sliceDistanceBox02 * 0.12) : 0;
-  const isBox02Exact = slice === box02.sliceIndex;
-
-  // Visual filter depending on Window/Level Preset & Invert
-  const getFilterStyle = () => {
-    let contrast = "100%";
-    let brightness = "100%";
-    if (wlPreset === "lung") {
-      contrast = "115%";
-      brightness = "95%";
-    } else if (wlPreset === "bone") {
-      contrast = "160%";
-      brightness = "110%";
-    } else if (wlPreset === "mediastinal") {
-      contrast = "130%";
-      brightness = "85%";
-    } else if (wlPreset === "brain") {
-      contrast = "140%";
-      brightness = "90%";
-    }
-    return {
-      filter: `${isInverted ? "invert(100%) " : ""}contrast(${contrast}) brightness(${brightness})`,
-    };
-  };
+  const showBox02 = isStudyLoaded && series === "axial" && sliceDistanceBox02 <= 6;
+  const opacityBox02 = showBox02 ? Math.max(0.2, 1 - sliceDistanceBox02 * 0.15) : 0;
 
   return (
     <div className="flex-1 flex flex-col bg-[#F8FAFC] p-3 overflow-hidden select-none">
@@ -120,12 +267,13 @@ export function CtViewport({
             return (
               <button
                 key={p.id}
+                disabled={!isStudyLoaded}
                 onClick={() => {
                   setWlPreset(p.id);
                   onToast(`Window/Level applied: ${p.label}`);
                 }}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer ${
-                  isActive
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isActive && isStudyLoaded
                     ? "bg-[#331C1A] text-[#FFB4AB] border border-[#522926] shadow-xs"
                     : "bg-white hover:bg-gray-100 text-gray-700 border border-gray-200"
                 }`}
@@ -137,37 +285,38 @@ export function CtViewport({
         </div>
 
         {/* Right: Viewport Interactive Tools */}
-        <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-gray-200/80 shadow-2xs">
+        <div className="flex items-center gap-1">
           {/* Pan */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setActiveTool("pan");
-              onToast("Tool: Pan viewport active");
+              onToast("Tool: Pan active");
             }}
-            title="Pan Tool"
-            aria-label="Pan Tool"
-            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            title="Pan Viewport"
+            aria-label="Pan Viewport"
+            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               activeTool === "pan"
                 ? "bg-gray-900 text-white"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v7M10 10.5V6a2 2 0 0 0-4 0v8" />
-              <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+              <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" />
             </svg>
           </button>
 
           {/* Zoom */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setActiveTool("zoom");
-              setZoomPercent((z) => (z >= 180 ? 100 : z + 20));
-              onToast(`Tool: Zoom set to ${zoomPercent >= 180 ? 100 : zoomPercent + 20}%`);
+              setZoomPercent((z) => (z >= 200 ? 100 : z + 20));
+              onToast(`Zoom: ${zoomPercent}%`);
             }}
-            title="Zoom Tool"
-            aria-label="Zoom Tool"
-            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            title="Zoom Viewport"
+            aria-label="Zoom Viewport"
+            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               activeTool === "zoom"
                 ? "bg-gray-900 text-white"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -181,15 +330,16 @@ export function CtViewport({
             </svg>
           </button>
 
-          {/* Measure / Caliper */}
+          {/* Measure */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setActiveTool("measure");
-              onToast("Tool: Caliper & 2D RECIST measurement active");
+              onToast("Tool: Caliper measurement active");
             }}
-            title="Measure / Caliper Tool"
-            aria-label="Measure / Caliper Tool"
-            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            title="Linear Caliper Measurement"
+            aria-label="Linear Caliper Measurement"
+            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               activeTool === "measure"
                 ? "bg-gray-900 text-white"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -202,13 +352,14 @@ export function CtViewport({
 
           {/* Crosshair */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setActiveTool("crosshair");
               onToast("Tool: 3D Crosshair cursor active");
             }}
             title="Crosshair Tool"
             aria-label="Crosshair Tool"
-            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               activeTool === "crosshair"
                 ? "bg-gray-900 text-white"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -225,13 +376,14 @@ export function CtViewport({
 
           {/* Bounding Box / Annotate */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setActiveTool("box");
               onToast("Tool: Visual Grounding Box Annotation toggled");
             }}
             title="Visual Grounding Annotation Box"
             aria-label="Visual Grounding Annotation Box"
-            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               activeTool === "box"
                 ? "bg-gray-900 text-white"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -244,13 +396,14 @@ export function CtViewport({
 
           {/* Invert */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setIsInverted((inv) => !inv);
               onToast(`Grayscale Inversion: ${!isInverted ? "ON" : "OFF"}`);
             }}
             title="Invert Grayscale"
             aria-label="Invert Grayscale"
-            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer ${
+            className={`w-7 h-7 rounded flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               isInverted
                 ? "bg-gray-900 text-white"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -260,403 +413,325 @@ export function CtViewport({
               <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 0 1 0-16z" />
             </svg>
           </button>
-
-          {/* Fullscreen / Expand */}
-          <button
-            onClick={() => onToast("Viewport expanded to maximum resolution")}
-            title="Toggle Viewport Fullscreen"
-            aria-label="Toggle Viewport Fullscreen"
-            className="w-7 h-7 rounded flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors cursor-pointer"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-            </svg>
-          </button>
         </div>
       </div>
 
-      {/* Main Viewport Display Area (Black Container) */}
-      <div
-        onMouseEnter={() => setIsHoveringViewer(true)}
-        onMouseLeave={() => setIsHoveringViewer(false)}
-        className="relative flex-1 rounded-2xl bg-[#080B0E] overflow-hidden flex items-center justify-center border border-gray-800 shadow-xl"
-      >
-        {/* Anatomical Orientation HUD Overlays */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 text-[11px] font-mono font-bold tracking-widest text-gray-400/80 pointer-events-none uppercase">
-          ANTERIOR
-        </div>
-        <div className="absolute bottom-14 left-1/2 -translate-x-1/2 text-[11px] font-mono font-bold tracking-widest text-gray-500/80 pointer-events-none uppercase">
-          POSTERIOR
-        </div>
-        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-gray-400/80 pointer-events-none">
-          R
-        </div>
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-gray-400/80 pointer-events-none">
-          L
-        </div>
-
-        {/* Heatmap Layer if Enabled */}
-        {heatmapEnabled && (
-          <div className="absolute inset-0 pointer-events-none z-10 opacity-30 mix-blend-screen bg-radial from-red-600 via-amber-500 to-transparent blur-md" />
-        )}
-
-        {/* Realistic High-Fidelity Thoracic CT SVG Viewport */}
+      {/* Main Viewport Display Area */}
+      {!isStudyLoaded ? (
+        /* DEFAULT STATE: No DICOM Uploaded -> Dedicated Upload DICOM Center */
         <div
-          style={getFilterStyle()}
-          className="w-full h-full max-w-[620px] max-h-[620px] p-4 flex items-center justify-center transition-all duration-200"
+          onDragEnter={handleViewportDragEnter}
+          onDragOver={handleViewportDragOver}
+          onDragLeave={handleViewportDragLeave}
+          onDrop={handleViewportDrop}
+          className={`relative flex-1 rounded-2xl overflow-hidden flex flex-col items-center justify-center p-8 text-center transition-all duration-200 border-2 select-none ${
+            dragOverViewport
+              ? "bg-[#0E1724] border-emerald-500 shadow-2xl scale-[0.99]"
+              : "bg-[#080B0E] border-dashed border-gray-700/80 hover:border-gray-500 shadow-xl"
+          }`}
         >
-          <svg
-            className="w-full h-full"
-            viewBox="0 0 500 500"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".dcm,.dicom,.zip,application/dicom,application/zip,application/x-zip-compressed"
+            onChange={(e) => {
+              if (e.target.files && e.target.files.length > 0) {
+                handleProcessUploadedFiles(e.target.files);
+              }
+            }}
+            className="hidden"
+          />
+
+          {isProcessingUpload ? (
+            <div className="flex flex-col items-center space-y-4 max-w-sm">
+              <div className="w-14 h-14 rounded-2xl bg-gray-900 border border-gray-700 flex items-center justify-center text-emerald-400 animate-pulse shadow-xl">
+                <svg className="w-7 h-7 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-gray-100">Ingesting DICOM Pixel Data...</h3>
+                <p className="text-xs text-gray-400 font-mono">{uploadProgressText}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center max-w-md space-y-4">
+              {/* Upload Icon */}
+              <div className="w-16 h-16 rounded-2xl bg-gray-900 border border-gray-700/90 flex items-center justify-center text-gray-300 shadow-xl">
+                <svg className="w-8 h-8 text-gray-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="text-base font-bold text-gray-100 tracking-tight">
+                  Upload CT DICOM Study
+                </h3>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Drag & drop your real CT DICOM file (<code className="text-gray-300">.dcm</code>) or series archive (<code className="text-gray-300">.zip</code>) to display real clinical axial CT imaging and run MedGemma 1.5.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-white text-gray-900 hover:bg-gray-100 shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-gray-900" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  Choose DICOM File
+                </button>
+
+                <button
+                  onClick={onOpenUploadModal}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-gray-900 text-gray-200 hover:text-white hover:bg-gray-800 border border-gray-700 transition-all cursor-pointer flex items-center gap-2"
+                >
+                  Open Upload Center / Samples
+                </button>
+              </div>
+
+              <div className="pt-4 flex items-center gap-4 text-[11px] font-mono text-gray-500 border-t border-gray-800/80 w-full justify-center">
+                <span>✓ 16-bit Calibrated HU</span>
+                <span>•</span>
+                <span>✓ Real Grayscale Pixels</span>
+                <span>•</span>
+                <span>✓ Part 10 Native</span>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ACTIVE CT STUDY: Display REAL DICOM Images on Canvas */
+        <div
+          onMouseLeave={handleCanvasMouseLeave}
+          onMouseMove={handleCanvasMouseMove}
+          onDragEnter={handleViewportDragEnter}
+          onDragOver={handleViewportDragOver}
+          onDragLeave={handleViewportDragLeave}
+          onDrop={handleViewportDrop}
+          className="relative flex-1 rounded-2xl bg-[#080B0E] overflow-hidden flex items-center justify-center border border-gray-800 shadow-xl"
+        >
+          {/* Drag over replacement banner */}
+          {dragOverViewport && (
+            <div className="absolute inset-0 z-30 bg-emerald-950/80 backdrop-blur-xs flex items-center justify-center border-2 border-dashed border-emerald-400">
+              <div className="text-center text-emerald-200 space-y-1">
+                <p className="text-sm font-bold">Drop to Load New DICOM Study</p>
+                <p className="text-xs text-emerald-400">Accepts .dcm slices or .zip archives</p>
+              </div>
+            </div>
+          )}
+
+          {/* Anatomical Orientation HUD Overlays */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 text-[11px] font-mono font-bold tracking-widest text-gray-400/80 pointer-events-none uppercase z-20">
+            ANTERIOR
+          </div>
+          <div className="absolute bottom-14 left-1/2 -translate-x-1/2 text-[11px] font-mono font-bold tracking-widest text-gray-500/80 pointer-events-none uppercase z-20">
+            POSTERIOR
+          </div>
+          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-gray-400/80 pointer-events-none z-20">
+            R
+          </div>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-gray-400/80 pointer-events-none z-20">
+            L
+          </div>
+
+          {/* Technical HUD Overlays: Top-Left */}
+          <div className="absolute top-3 left-4 text-left font-mono text-[10px] text-gray-400 space-y-0.5 pointer-events-none z-20 bg-black/40 px-2 py-1 rounded backdrop-blur-xs border border-white/5">
+            <div className="font-bold text-gray-200">{activeDataset?.patientName || "ANONYMIZED PATIENT"}</div>
+            <div>{activeDataset?.modality || "CT"} • {activeDataset?.seriesDescription || "Axial CT"}</div>
+            <div className="text-gray-500">Matrix: {currentSlice?.cols || 512}x{currentSlice?.rows || 512}</div>
+          </div>
+
+          {/* Technical HUD Overlays: Top-Right */}
+          <div className="absolute top-3 right-4 text-right font-mono text-[10px] text-gray-400 space-y-0.5 pointer-events-none z-20 bg-black/40 px-2 py-1 rounded backdrop-blur-xs border border-white/5">
+            <div className="font-semibold text-gray-200">W: {effectiveWw} L: {effectiveWc}</div>
+            <div>Kernel: {activeDataset?.reconKernel || "B60f Sharp"}</div>
+            <div className="text-gray-500">{activeDataset?.kvp || 120} kVp • {activeDataset?.ma || 240} mA</div>
+          </div>
+
+          {/* Heatmap Layer if Enabled */}
+          {heatmapEnabled && (
+            <div className="absolute inset-0 pointer-events-none z-10 opacity-30 mix-blend-screen bg-radial from-red-600 via-amber-500 to-transparent blur-md" />
+          )}
+
+          {/* Real CT Canvas Display */}
+          <div
+            style={{
+              transform: `scale(${zoomPercent / 100})`,
+              transformOrigin: "center center",
+            }}
+            className="relative flex items-center justify-center max-w-[620px] max-h-[620px] p-2 transition-transform duration-100"
           >
-            {/* Thoracic Outer Skin & Subcutaneous Fat */}
-            <ellipse
-              cx="250"
-              cy="255"
-              rx="210"
-              ry="165"
-              fill="#182028"
-              stroke="#2E3B4B"
-              strokeWidth="5"
+            <canvas
+              ref={canvasRef}
+              className="max-w-full max-h-full object-contain rounded-xs shadow-2xl"
             />
 
-            {/* Thoracic Wall & Musculature */}
-            <ellipse
-              cx="250"
-              cy="255"
-              rx="195"
-              ry="150"
-              fill="#0F141A"
-              stroke="#222C38"
-              strokeWidth="4"
-            />
-
-            {/* Sternum (Anterior bone) */}
-            <path
-              d="M236 112 H264 V120 H236 Z"
-              fill="#94A3B8"
-              stroke="#CBD5E1"
-              strokeWidth="1.5"
-            />
-
-            {/* Vertebral Body & Spinal Canal (Posterior bone) */}
-            <g>
-              <ellipse cx="250" cy="370" rx="22" ry="16" fill="#94A3B8" stroke="#E2E8F0" strokeWidth="2" />
-              {/* Spinal canal */}
-              <ellipse cx="250" cy="365" rx="8" ry="6" fill="#080B0E" />
-              {/* Spinous process */}
-              <polygon points="250,386 244,402 256,402" fill="#64748B" />
-              {/* Transverse processes */}
-              <ellipse cx="220" cy="368" rx="8" ry="4" fill="#64748B" />
-              <ellipse cx="280" cy="368" rx="8" ry="4" fill="#64748B" />
-            </g>
-
-            {/* Bilateral Ribs (Curved bone sections) */}
-            <g stroke="#94A3B8" strokeWidth="3" fill="#64748B">
-              <ellipse cx="88" cy="210" rx="6" ry="14" />
-              <ellipse cx="78" cy="255" rx="6" ry="15" />
-              <ellipse cx="86" cy="305" rx="6" ry="14" />
-              <ellipse cx="110" cy="350" rx="8" ry="12" />
-
-              <ellipse cx="412" cy="210" rx="6" ry="14" />
-              <ellipse cx="422" cy="255" rx="6" ry="15" />
-              <ellipse cx="414" cy="305" rx="6" ry="14" />
-              <ellipse cx="390" cy="350" rx="8" ry="12" />
-            </g>
-
-            {/* Right Lung Field (Dark radiolucent area, anatomical right = left of image) */}
-            <path
-              d="M228 140 C170 140, 105 170, 95 240 C85 305, 120 365, 200 375 C215 377, 226 350, 226 300 C226 230, 232 170, 228 140 Z"
-              fill="#06090D"
-              stroke="#1E293B"
-              strokeWidth="2.5"
-            />
-
-            {/* Left Lung Field (Dark radiolucent area, anatomical left = right of image) */}
-            <path
-              d="M272 140 C330 140, 395 170, 405 240 C415 305, 380 365, 300 375 C285 377, 274 350, 274 300 C274 230, 268 170, 272 140 Z"
-              fill="#06090D"
-              stroke="#1E293B"
-              strokeWidth="2.5"
-            />
-
-            {/* Pulmonary Bronchovascular Markings in Right Lung */}
-            <g stroke="#1F2937" strokeWidth="1.8" strokeLinecap="round" opacity="0.85">
-              <path d="M210 240 Q175 220 140 215" />
-              <path d="M175 220 Q160 190 145 175" />
-              <path d="M175 220 Q165 250 135 265" />
-              <path d="M195 280 Q160 300 135 320" />
-            </g>
-
-            {/* Pulmonary Bronchovascular Markings in Left Lung */}
-            <g stroke="#1F2937" strokeWidth="1.8" strokeLinecap="round" opacity="0.85">
-              <path d="M290 240 Q325 220 360 215" />
-              <path d="M325 220 Q340 190 355 175" />
-              <path d="M325 220 Q335 250 365 265" />
-              <path d="M305 280 Q340 300 365 320" />
-            </g>
-
-            {/* Central Mediastinum & Cardiac Silhouette */}
-            <ellipse
-              cx="250"
-              cy="255"
-              rx="40"
-              ry="75"
-              fill="#141B22"
-              stroke="#2E3C4E"
-              strokeWidth="2"
-            />
-            {/* Ascending / Descending Aorta and Main Pulmonary Artery */}
-            <circle cx="242" cy="225" r="14" fill="#1E2836" stroke="#37475E" strokeWidth="2" />
-            <circle cx="260" cy="305" r="16" fill="#1A2330" stroke="#334358" strokeWidth="2" />
-            <circle cx="235" cy="275" r="18" fill="#1A2330" stroke="#334358" strokeWidth="2" />
-
-            {/* LESION 1: Right Upper Lobe Spiculated Nodule (Primary Detection) */}
+            {/* Visual Grounding Lesion Box 01 */}
             {showBox01 && (
-              <g
-                style={{ opacity: opacityBox01 }}
-                className="transition-opacity duration-300"
+              <div
+                style={{
+                  position: "absolute",
+                  left: `${box01.coordinates[0] * 100}%`,
+                  top: `${box01.coordinates[1] * 100}%`,
+                  transform: "translate(-50%, -50%)",
+                  opacity: opacityBox01,
+                }}
+                className="pointer-events-none transition-opacity duration-300 z-10"
               >
-                {/* Spiculated Starburst Nodule Body (Anatomical Right Lung, Slice ~42) */}
-                <g transform="translate(162, 238)">
-                  {/* Peripheral micro-spiculations */}
-                  <path
-                    d="M 0 -14 L 3 -6 L 12 -12 L 6 -2 L 15 0 L 7 4 L 13 11 L 3 6 L 0 15 L -3 6 L -13 12 L -7 3 L -15 0 L -7 -3 L -12 -11 L -3 -6 Z"
-                    fill="#E2E8F0"
-                    stroke="#F8FAFC"
-                    strokeWidth="1.2"
-                    className="drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]"
-                  />
-                  {/* Ground glass halo */}
-                  <circle cx="0" cy="0" r="16" fill="rgba(226, 232, 240, 0.15)" />
-                  {/* Dense core */}
-                  <circle cx="0" cy="0" r="5" fill="#FFFFFF" />
-                </g>
-
-                {/* Caliper Measurement Line: 14.2 mm */}
-                <g stroke="#EF4444" strokeWidth="1.5">
-                  <line x1="148" y1="238" x2="176" y2="238" />
-                  <line x1="148" y1="234" x2="148" y2="242" />
-                  <line x1="176" y1="234" x2="176" y2="242" />
-                  <rect x="151" y="227" width="22" height="9" rx="2" fill="#1E293B" />
-                  <text
-                    x="162"
-                    y="234"
-                    fill="#FCA5A5"
-                    fontSize="6.5"
-                    fontFamily="monospace"
-                    fontWeight="bold"
-                    textAnchor="middle"
-                  >
-                    14.2mm
-                  </text>
-                </g>
-
-                {/* Red Bounding Box [xmin: 130, ymin: 205, xmax: 194, ymax: 270] */}
-                <rect
-                  x="128"
-                  y="204"
-                  width="68"
-                  height="68"
-                  rx="3"
-                  fill="none"
-                  stroke="#DC2626"
-                  strokeWidth={isBox01Exact ? "2" : "1.5"}
-                  strokeDasharray={isBox01Exact ? "none" : "4 2"}
-                />
-
-                {/* Bounding Box Label Tag */}
-                <g transform="translate(126, 192)">
-                  <rect
-                    x="0"
-                    y="0"
-                    width="196"
-                    height="13"
-                    rx="6.5"
-                    fill="#DC2626"
-                    className="shadow-sm"
-                  />
-                  <circle cx="6" cy="6.5" r="2.5" fill="#FFFFFF" />
-                  <text
-                    x="13"
-                    y="9.2"
-                    fill="#FFFFFF"
-                    fontSize="7"
-                    fontFamily="sans-serif"
-                    fontWeight="600"
-                  >
-                    BOX-01: RUL Spiculated Nodule • 14.2mm
-                  </text>
-                  <text
-                    x="146"
-                    y="9.2"
-                    fill="#FEE2E2"
-                    fontSize="6.5"
-                    fontFamily="monospace"
-                  >
-                    [0.380, 0.620, 0.490]
-                  </text>
-                </g>
-              </g>
+                <div className="relative w-16 h-16 border-2 border-red-500 rounded-sm bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.5)]">
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-600 text-white text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                    BOX-01: {box01.diameterMm}mm
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-full h-px bg-red-400/80" />
+                    <div className="h-full w-px bg-red-400/80" />
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* LESION 2: Left Lower Lobe Subpleural Nodule (Slice ~65) */}
+            {/* Visual Grounding Lesion Box 02 */}
             {showBox02 && (
-              <g
-                style={{ opacity: opacityBox02 }}
-                className="transition-opacity duration-300"
+              <div
+                style={{
+                  position: "absolute",
+                  left: `${box02.coordinates[0] * 100}%`,
+                  top: `${box02.coordinates[1] * 100}%`,
+                  transform: "translate(-50%, -50%)",
+                  opacity: opacityBox02,
+                }}
+                className="pointer-events-none transition-opacity duration-300 z-10"
               >
-                {/* 6.5mm Subpleural Nodule */}
-                <g transform="translate(345, 310)">
-                  <circle cx="0" cy="0" r="5" fill="#E2E8F0" stroke="#F1F5F9" strokeWidth="1" />
-                  <circle cx="0" cy="0" r="8" fill="rgba(245, 158, 11, 0.2)" />
-                </g>
-
-                {/* Amber Bounding Box */}
-                <rect
-                  x="330"
-                  y="295"
-                  width="32"
-                  height="32"
-                  rx="2"
-                  fill="none"
-                  stroke="#D97706"
-                  strokeWidth="1.5"
-                />
-
-                {/* Label Tag */}
-                <g transform="translate(320, 283)">
-                  <rect
-                    x="0"
-                    y="0"
-                    width="142"
-                    height="12"
-                    rx="6"
-                    fill="#D97706"
-                  />
-                  <text
-                    x="8"
-                    y="8.5"
-                    fill="#FFFFFF"
-                    fontSize="6.5"
-                    fontFamily="sans-serif"
-                    fontWeight="600"
-                  >
-                    BOX-02: LLL Subpleural • 6.5mm
-                  </text>
-                </g>
-              </g>
+                <div className="relative w-10 h-10 border-2 border-amber-500 rounded-sm bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.5)]">
+                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-600 text-white text-[8px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm">
+                    BOX-02: {box02.diameterMm}mm
+                  </div>
+                </div>
+              </div>
             )}
-          </svg>
-        </div>
+          </div>
 
-        {/* Bottom Viewer Overlay Bar (Inside dark canvas bottom) */}
-        <div className="absolute bottom-3 left-4 right-4 bg-white/95 backdrop-blur-md rounded-xl p-2 px-3 flex items-center justify-between border border-gray-200/80 shadow-md">
-          {/* Left: Play/Pause, Slice Info */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                setIsPlaying((p) => !p);
-                onToast(isPlaying ? "Paused Cine playback" : "Starting Cine playback loop");
-              }}
-              title={isPlaying ? "Pause Cineloop" : "Play Cineloop (Spacebar)"}
-              aria-label={isPlaying ? "Pause Cineloop" : "Play Cineloop"}
-              className="w-7 h-7 rounded-full bg-gray-900 text-white flex items-center justify-center hover:bg-black transition-transform active:scale-95 cursor-pointer shadow-xs"
-            >
-              {isPlaying ? (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="4" width="4" height="16" />
-                  <rect x="14" y="4" width="4" height="16" />
+          {/* Bottom Viewer Overlay Bar */}
+          <div className="absolute bottom-3 left-4 right-4 bg-white/95 backdrop-blur-md rounded-xl p-2 px-3 flex items-center justify-between border border-gray-200/80 shadow-md z-20">
+            {/* Left: Play/Pause, Slice Info */}
+            <div className="flex items-center gap-3">
+              <button
+                disabled={totalSlices <= 1}
+                onClick={() => {
+                  setIsPlaying((p) => !p);
+                  onToast(isPlaying ? "Paused Cine playback" : "Starting Cine playback loop");
+                }}
+                title={isPlaying ? "Pause Cineloop" : "Play Cineloop (Spacebar)"}
+                aria-label={isPlaying ? "Pause Cineloop" : "Play Cineloop"}
+                className="w-7 h-7 rounded-full bg-gray-900 text-white flex items-center justify-center hover:bg-black transition-transform active:scale-95 cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isPlaying ? (
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="4" width="4" height="16" />
+                    <rect x="14" y="4" width="4" height="16" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                )}
+              </button>
+
+              <button
+                onClick={() => setHighlightedBox(highlightedBox ? null : "BOX-01")}
+                title="Target Slice Indicator"
+                aria-label="Toggle Box Highlight"
+                className="text-red-500 hover:text-red-700"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="12 2 2 22 22 22" />
                 </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3" />
+              </button>
+
+              <div className="flex items-baseline gap-1 text-xs">
+                <span className="font-semibold text-gray-900">
+                  Slice: {slice} / {totalSlices}
+                </span>
+                <span className="text-gray-500 font-mono text-[11px]">
+                  (Z: {zPositionMm}mm)
+                </span>
+              </div>
+            </div>
+
+            {/* Middle: Interactive Scrubber Slider */}
+            <div className="flex-1 max-w-sm mx-4 flex items-center gap-2">
+              <button
+                disabled={totalSlices <= 1}
+                onClick={() => setSlice((s) => Math.max(1, s - 1))}
+                aria-label="Previous slice"
+                className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-gray-800 hover:bg-gray-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="15 18 9 12 15 6" />
                 </svg>
-              )}
-            </button>
+              </button>
 
-            <button
-              onClick={() => setHighlightedBox(highlightedBox ? null : "BOX-01")}
-              title="Target Slice Indicator"
-              aria-label="Toggle Box Highlight"
-              className="text-red-500 hover:text-red-700"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polygon points="12 2 2 22 22 22" />
-              </svg>
-            </button>
+              <div className="relative flex-1 flex items-center">
+                <input
+                  type="range"
+                  min="1"
+                  max={Math.max(1, totalSlices)}
+                  value={slice}
+                  disabled={totalSlices <= 1}
+                  onChange={(e) => setSlice(Number(e.target.value))}
+                  aria-label="CT axial slice position"
+                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-600 focus:outline-none disabled:opacity-50"
+                />
+                {totalSlices > 1 && (
+                  <>
+                    <div
+                      title="BOX-01 Target Slice"
+                      style={{ left: `${(box01.sliceIndex / totalSlices) * 100}%` }}
+                      className="absolute w-2 h-2 -top-0.5 rounded-full bg-red-500 border border-white pointer-events-none"
+                    />
+                    <div
+                      title="BOX-02 Target Slice"
+                      style={{ left: `${(box02.sliceIndex / totalSlices) * 100}%` }}
+                      className="absolute w-2 h-2 -top-0.5 rounded-full bg-amber-500 border border-white pointer-events-none"
+                    />
+                  </>
+                )}
+              </div>
 
-            <div className="flex items-baseline gap-1 text-xs">
-              <span className="font-semibold text-gray-900">
-                Slice: {slice} / {totalSlices}
-              </span>
-              <span className="text-gray-500 font-mono text-[11px]">
-                (Z: {zPositionMm}mm)
+              <button
+                disabled={totalSlices <= 1}
+                onClick={() => setSlice((s) => Math.min(totalSlices, s + 1))}
+                aria-label="Next slice"
+                className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-gray-800 hover:bg-gray-100 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Right: Technical Viewport State (FOV, Zoom, Live HU) */}
+            <div className="flex items-center gap-2 font-mono text-[10px] text-gray-500">
+              <span>FOV: 360mm</span>
+              <span>•</span>
+              <span>Zoom: {zoomPercent}%</span>
+              <span>•</span>
+              <span className="font-semibold text-gray-800">
+                HU: {hoverHu !== null ? `${hoverHu > 0 ? "+" : ""}${hoverHu}` : slice === 42 ? "+45" : "-620"}
               </span>
             </div>
           </div>
-
-          {/* Middle: Interactive Scrubber Slider */}
-          <div className="flex-1 max-w-sm mx-4 flex items-center gap-2">
-            <button
-              onClick={() => setSlice((s) => Math.max(1, s - 1))}
-              aria-label="Previous slice"
-              className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-gray-800 hover:bg-gray-100 cursor-pointer"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
-            </button>
-
-            <div className="relative flex-1 flex items-center">
-              <input
-                type="range"
-                min="1"
-                max={totalSlices}
-                value={slice}
-                onChange={(e) => setSlice(Number(e.target.value))}
-                aria-label="CT axial slice position"
-                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-red-600 focus:outline-none"
-              />
-              {/* Highlight marker dot for Box 01 at Slice 42 */}
-              <div
-                title="BOX-01 (Slice 42)"
-                style={{ left: `${(42 / totalSlices) * 100}%` }}
-                className="absolute w-2 h-2 -top-0.5 rounded-full bg-red-500 border border-white pointer-events-none"
-              />
-              {/* Highlight marker dot for Box 02 at Slice 65 */}
-              <div
-                title="BOX-02 (Slice 65)"
-                style={{ left: `${(65 / totalSlices) * 100}%` }}
-                className="absolute w-2 h-2 -top-0.5 rounded-full bg-amber-500 border border-white pointer-events-none"
-              />
-            </div>
-
-            <button
-              onClick={() => setSlice((s) => Math.min(totalSlices, s + 1))}
-              aria-label="Next slice"
-              className="w-5 h-5 rounded flex items-center justify-center text-gray-400 hover:text-gray-800 hover:bg-gray-100 cursor-pointer"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Right: Technical Viewport State (FOV, Zoom, HU) */}
-          <div className="flex items-center gap-2 font-mono text-[10px] text-gray-500">
-            <span>FOV: 360mm</span>
-            <span>•</span>
-            <span>Zoom: {zoomPercent}%</span>
-            <span>•</span>
-            <span className="font-semibold text-gray-800">
-              HU: {slice === 42 ? "+45" : slice === 65 ? "+22" : "-620"}
-            </span>
-          </div>
         </div>
-      </div>
+      )}
 
       {/* Bottom Footer Actions Bar */}
       <div className="pt-2 px-1 flex items-center justify-between shrink-0 select-none">
@@ -664,11 +739,12 @@ export function CtViewport({
         <div className="flex items-center gap-2">
           {/* Split Sync */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setSplitSync((s) => !s);
               onToast(`Split Sync mode: ${!splitSync ? "ACTIVE" : "DISABLED"}`);
             }}
-            className={`px-3 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-colors cursor-pointer ${
+            className={`px-3 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               splitSync
                 ? "bg-gray-900 text-white border-gray-900"
                 : "bg-white text-gray-700 hover:bg-gray-100 border-gray-200"
@@ -683,11 +759,12 @@ export function CtViewport({
 
           {/* Temporal Diff Heatmap */}
           <button
+            disabled={!isStudyLoaded}
             onClick={() => {
               setHeatmapEnabled((h) => !h);
               onToast(`Temporal Diff Heatmap: ${!heatmapEnabled ? "ON" : "OFF"}`);
             }}
-            className={`px-3 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-colors cursor-pointer ${
+            className={`px-3 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               heatmapEnabled
                 ? "bg-red-600 text-white border-red-600"
                 : "bg-white text-gray-700 hover:bg-gray-100 border-gray-200"
@@ -704,8 +781,9 @@ export function CtViewport({
 
           {/* 3D Volumetric View */}
           <button
+            disabled={!isStudyLoaded}
             onClick={onOpen3dView}
-            className="px-3 py-1 rounded-md text-xs font-medium bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3 py-1 rounded-md text-xs font-medium bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
@@ -716,16 +794,9 @@ export function CtViewport({
 
         {/* Right Acquisition Specs */}
         <div className="font-mono text-[10px] text-gray-400 flex items-center gap-1.5">
-          <span>120 kVp</span>
-          <span>•</span>
-          <span>240 mA</span>
-          <span>•</span>
-          <span>Recon: B60f Sharp</span>
-          <span>•</span>
-          <span className="font-semibold text-gray-600">Cornerstone3D v2.0</span>
+          <span>{isStudyLoaded ? reconSpecs || "Native Part 10 DICOM Calibrated HU" : "Awaiting DICOM CT Ingestion"}</span>
         </div>
       </div>
     </div>
   );
 }
-

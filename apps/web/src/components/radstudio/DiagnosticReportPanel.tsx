@@ -12,6 +12,7 @@ interface DiagnosticReportPanelProps {
   onJumpBox01: () => void;
   onJumpBox02: () => void;
   currentSlice: number;
+  hasStudy?: boolean;
 }
 
 export function DiagnosticReportPanel({
@@ -20,7 +21,40 @@ export function DiagnosticReportPanel({
   onJumpBox01,
   onJumpBox02,
   currentSlice,
+  hasStudy = false,
 }: DiagnosticReportPanelProps) {
+  if (!hasStudy) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200/90 p-4 shadow-2xs space-y-3 select-none flex-1 flex flex-col justify-between overflow-hidden">
+        <div className="flex items-center justify-between pb-1 border-b border-gray-100">
+          <div className="flex items-center gap-1.5">
+            <svg
+              className="w-4 h-4 text-gray-700"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
+            </svg>
+            <h2 className="text-xs font-bold text-gray-900 tracking-tight">
+              Diagnostic Report
+            </h2>
+          </div>
+          <span className="text-[10px] font-mono text-gray-400">Synthesis Pending</span>
+        </div>
+        <div className="text-center py-6 space-y-2">
+          <p className="text-xs font-semibold text-gray-700">Report Synthesis Pending</p>
+          <p className="text-[11px] text-gray-400 leading-relaxed max-w-xs mx-auto">
+            Structured radiological findings and measurements will be synthesized automatically once a DICOM CT study is uploaded.
+          </p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="bg-white rounded-xl border border-gray-200/90 p-3.5 shadow-2xs space-y-3 select-none flex-1 flex flex-col justify-between overflow-hidden">
       <div className="space-y-2.5 overflow-y-auto pr-1">
