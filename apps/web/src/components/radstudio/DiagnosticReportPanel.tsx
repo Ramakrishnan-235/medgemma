@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import type { DiagnosticReportData, LesionBox } from "./types";
 
 interface DiagnosticReportPanelProps {
   expandedSections: {
@@ -13,6 +14,9 @@ interface DiagnosticReportPanelProps {
   onJumpBox02: () => void;
   currentSlice: number;
   hasStudy?: boolean;
+  report?: DiagnosticReportData | null;
+  box01?: LesionBox | null;
+  box02?: LesionBox | null;
 }
 
 export function DiagnosticReportPanel({
@@ -22,6 +26,9 @@ export function DiagnosticReportPanel({
   onJumpBox02,
   currentSlice,
   hasStudy = false,
+  report,
+  box01,
+  box02,
 }: DiagnosticReportPanelProps) {
   if (!hasStudy) {
     return (
@@ -109,35 +116,41 @@ export function DiagnosticReportPanel({
           {expandedSections.lungs && (
             <div className="px-3 pb-3 pt-1 text-xs text-gray-700 leading-relaxed space-y-2 border-t border-gray-100 bg-white">
               <p>
-                A <strong>14.2 mm spiculated solid pulmonary nodule</strong> is
-                identified within the apical segment of the right upper lobe (
-                <button
-                  onClick={onJumpBox01}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium font-mono border transition-all cursor-pointer ${
-                    currentSlice === 42
-                      ? "bg-red-600 text-white border-red-700 shadow-2xs scale-105"
-                      : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                  Slice 42 • BOX-01
-                </button>
-                ). Demonstrates internal ground-glass halo and peripheral micro-spiculation.
-                Stable <strong>6.5 mm subpleural nodule</strong> in the left lower lobe (
-                <button
-                  onClick={onJumpBox02}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium font-mono border transition-all cursor-pointer mx-1 ${
-                    currentSlice === 65
-                      ? "bg-amber-600 text-white border-amber-700 shadow-2xs scale-105"
-                      : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                  Slice 65 • BOX-02
-                </button>
-                ). Airways are patent without evidence of endobronchial lesion. No pneumothorax.
-                <span className="inline-block w-1.5 h-3.5 bg-red-600 ml-1 animate-pulse align-middle" />
+                {report?.lungsFinding || (
+                  <>
+                    A <strong>14.2 mm spiculated solid pulmonary nodule</strong> is identified within the apical segment of the right upper lobe.
+                  </>
+                )}
               </p>
+              {box01 && (
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={onJumpBox01}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium font-mono border transition-all cursor-pointer ${
+                      currentSlice === box01.sliceIndex
+                        ? "bg-red-600 text-white border-red-700 shadow-2xs scale-105"
+                        : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                    Slice {box01.sliceIndex} • {box01.id} ({box01.diameterMm}mm)
+                  </button>
+
+                  {box02 && (
+                    <button
+                      onClick={onJumpBox02}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium font-mono border transition-all cursor-pointer ${
+                        currentSlice === box02.sliceIndex
+                          ? "bg-amber-600 text-white border-amber-700 shadow-2xs scale-105"
+                          : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                      }`}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                      Slice {box02.sliceIndex} • {box02.id} ({box02.diameterMm}mm)
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -168,9 +181,8 @@ export function DiagnosticReportPanel({
           {expandedSections.mediastinum && (
             <div className="px-3 pb-3 pt-1 text-xs text-gray-700 leading-relaxed border-t border-gray-100 bg-white">
               <p>
-                No mediastinal or hilar lymphadenopathy. Subcarinal and
-                paratracheal stations appear morphologically normal. Cardiac
-                silhouette is normal in size without pericardial effusion.
+                {report?.mediastinumFinding ||
+                  "No mediastinal or hilar lymphadenopathy. Subcarinal and paratracheal stations appear morphologically normal. Cardiac silhouette is normal in size without pericardial effusion."}
               </p>
             </div>
           )}
@@ -202,9 +214,8 @@ export function DiagnosticReportPanel({
           {expandedSections.pleura && (
             <div className="px-3 pb-3 pt-1 text-xs text-gray-700 leading-relaxed border-t border-gray-100 bg-white">
               <p>
-                No pleural effusion. Thin visceral pleural tag adjacent to the
-                right upper lobe lesion without frank chest wall erosion or rib
-                osteolysis.
+                {report?.pleuraFinding ||
+                  "No pleural effusion. Visceral and parietal pleural surfaces intact without frank chest wall erosion or rib osteolysis."}
               </p>
             </div>
           )}
@@ -212,18 +223,29 @@ export function DiagnosticReportPanel({
       </div>
 
       {/* OVERALL CLINICAL IMPRESSION Callout */}
-      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-800 leading-relaxed space-y-1">
+      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-800 leading-relaxed space-y-1.5">
         <div className="flex items-center gap-1.5 font-bold text-[11px] text-gray-900 tracking-wide uppercase font-mono">
-          <span className="w-2 h-2 rounded-full bg-red-600" />
+          <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
           OVERALL CLINICAL IMPRESSION
         </div>
-        <p className="text-[11px] text-gray-700">
-          <strong>1. 14.2 mm spiculated RUL pulmonary nodule</strong> with
-          interval volumetric expansion from prior examination (Volume doubling
-          time: 118 days). Highly suspicious for primary bronchogenic carcinoma
-          (Lung-RADS 4B). Tissue biopsy or PET-CT staging correlation is
-          recommended.
-        </p>
+        {report?.impressions && report.impressions.length > 0 ? (
+          <div className="space-y-1 text-[11px] text-gray-700">
+            {report.impressions.map((imp, idx) => (
+              <p key={idx}>
+                <strong>{imp}</strong>
+              </p>
+            ))}
+            {report.recommendation && (
+              <p className="text-gray-600 pt-1 text-[10.5px]">
+                <em>Recommendation: {report.recommendation}</em>
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-700">
+            <strong>1. Diagnostic study complete.</strong> Normal baseline examination. Routine screening surveillance per ACR guidelines.
+          </p>
+        )}
       </div>
     </div>
   );

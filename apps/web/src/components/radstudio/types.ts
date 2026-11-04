@@ -96,6 +96,22 @@ export interface DicomSlice {
   patientName?: string;
 }
 
+export interface DiagnosticReportData {
+  lungsFinding: string;
+  mediastinumFinding: string;
+  pleuraFinding: string;
+  impressions: string[];
+  recommendation: string;
+  hasNodule: boolean;
+  noduleDetails?: {
+    sliceIndex: number;
+    diameterMm: number;
+    volumeCm3: number;
+    meanHu: number;
+    site: string;
+  };
+}
+
 export interface DicomSeriesDataset {
   seriesInstanceUid: string;
   seriesDescription: string;

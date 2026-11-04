@@ -7,7 +7,7 @@ interface FhirModalProps {
   isOpen: boolean;
   onClose: () => void;
   assessment: DiagnosticAssessmentData;
-  box01: LesionBox;
+  box01?: LesionBox | null;
   onToast: (msg: string) => void;
 }
 
@@ -58,72 +58,77 @@ export function FhirModal({
             display: "ANONYMIZED CLINICAL SUBJECT",
           },
           effectiveDateTime: new Date().toISOString(),
-          conclusion:
-            "14.2 mm spiculated RUL pulmonary nodule (Lung-RADS 4B, Malignancy probability 84.2%). Interval volumetric expansion with volume doubling time of 118 days.",
+          conclusion: box01
+            ? `${box01.diameterMm} mm ${box01.label} (${assessment.lungRadsCurrent}, Malignancy probability ${assessment.malignancyProbability}%). Volume ${box01.volumeCm3} cm³.`
+            : `Thoracic CT study (${assessment.accessionNumber}). ${assessment.lungRadsCurrent}. No suspicious focal pulmonary nodules detected.`,
           conclusionCode: [
             {
               coding: [
                 {
                   system: "http://radlex.org",
                   code: "RID50170",
-                  display: "Lung-RADS 4B",
+                  display: assessment.lungRadsCurrent,
                 },
               ],
             },
           ],
         },
       },
-      {
-        resource: {
-          resourceType: "Observation",
-          id: "obs-rul-nodule-89432",
-          status: "final",
-          code: {
-            coding: [
-              {
-                system: "http://loinc.org",
-                code: "33728-7",
-                display: "Size of lung nodule",
-              },
-            ],
-          },
-          valueQuantity: {
-            value: box01.diameterMm,
-            unit: "mm",
-            system: "http://unitsofmeasure.org",
-            code: "mm",
-          },
-          bodySite: {
-            coding: [
-              {
-                system: "http://snomed.info/sct",
-                code: "45661006",
-                display: "Structure of apical segment of right upper lobe of lung",
-              },
-            ],
-          },
-          component: [
+      ...(box01
+        ? [
             {
-              code: { text: "Malignancy Probability" },
-              valueQuantity: {
-                value: assessment.malignancyProbability,
-                unit: "%",
+              resource: {
+                resourceType: "Observation",
+                id: `obs-nodule-${box01.id.toLowerCase()}`,
+                status: "final",
+                code: {
+                  coding: [
+                    {
+                      system: "http://loinc.org",
+                      code: "33728-7",
+                      display: "Size of lung nodule",
+                    },
+                  ],
+                },
+                valueQuantity: {
+                  value: box01.diameterMm,
+                  unit: "mm",
+                  system: "http://unitsofmeasure.org",
+                  code: "mm",
+                },
+                bodySite: {
+                  coding: [
+                    {
+                      system: "http://snomed.info/sct",
+                      code: "45661006",
+                      display: box01.site,
+                    },
+                  ],
+                },
+                component: [
+                  {
+                    code: { text: "Malignancy Probability" },
+                    valueQuantity: {
+                      value: assessment.malignancyProbability,
+                      unit: "%",
+                    },
+                  },
+                  {
+                    code: { text: "Volume Doubling Time (VDT)" },
+                    valueQuantity: {
+                      value: assessment.vdtDays,
+                      unit: "d",
+                    },
+                  },
+                  {
+                    code: { text: "Slice Coordinate Index" },
+                    valueInteger: box01.sliceIndex,
+                  },
+                ],
               },
             },
-            {
-              code: { text: "Volume Doubling Time (VDT)" },
-              valueQuantity: {
-                value: assessment.vdtDays,
-                unit: "d",
-              },
-            },
-            {
-              code: { text: "Slice Coordinate Index" },
-              valueInteger: box01.sliceIndex,
-            },
-          ],
-        },
-      },
+          ]
+        : []),
     ],
   };
 

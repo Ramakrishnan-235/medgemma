@@ -6,7 +6,7 @@ import type { LesionBox } from "./types";
 interface VolumetricModal3DProps {
   isOpen: boolean;
   onClose: () => void;
-  box01: LesionBox;
+  box01?: LesionBox | null;
   onToast: (msg: string) => void;
 }
 
@@ -62,18 +62,26 @@ export function VolumetricModal3D({
             </g>
 
             {/* Reconstructed 3D Tumor Mesh for BOX-01 */}
-            <g transform="translate(135, 85)">
-              <polygon
-                points="0,-16 6,-8 18,-6 10,4 14,16 2,10 -8,18 -6,6 -16,0 -6,-6"
-                fill="#EF4444"
-                className="animate-pulse"
-                opacity="0.9"
-              />
-              <circle cx="0" cy="0" r="14" fill="none" stroke="#FCA5A5" strokeWidth="1" strokeDasharray="2 2" />
-              <text x="0" y="26" fill="#F87171" fontSize="7" textAnchor="middle" fontFamily="monospace">
-                14.2mm ({box01.volumeCm3} cm³)
-              </text>
-            </g>
+            {box01 ? (
+              <g transform="translate(135, 85)">
+                <polygon
+                  points="0,-16 6,-8 18,-6 10,4 14,16 2,10 -8,18 -6,6 -16,0 -6,-6"
+                  fill="#EF4444"
+                  className="animate-pulse"
+                  opacity="0.9"
+                />
+                <circle cx="0" cy="0" r="14" fill="none" stroke="#FCA5A5" strokeWidth="1" strokeDasharray="2 2" />
+                <text x="0" y="26" fill="#F87171" fontSize="7" textAnchor="middle" fontFamily="monospace">
+                  {box01.diameterMm}mm ({box01.volumeCm3} cm³)
+                </text>
+              </g>
+            ) : (
+              <g transform="translate(100, 110)">
+                <text x="0" y="0" fill="#94A3B8" fontSize="8" textAnchor="middle" fontFamily="monospace">
+                  No focal lesion detected
+                </text>
+              </g>
+            )}
           </svg>
 
           {/* Interactive Controls Overlay */}

@@ -8,9 +8,11 @@ import type {
   ViewportToolType,
   LesionBox,
   DiagnosticAssessmentData,
+  DiagnosticReportData,
   UploadedStudyData,
   DicomSeriesDataset,
 } from "./types";
+import { analyzeDicomDataset } from "./clinical-analyzer";
 
 export const DEFAULT_ASSESSMENT: DiagnosticAssessmentData = {
   accessionNumber: "ACC-89432",
@@ -68,7 +70,7 @@ export function useRadStudioState() {
   const [activeTool, setActiveTool] = useState<ViewportToolType>("measure");
   const [zoomPercent, setZoomPercent] = useState<number>(140);
   const [isInverted, setIsInverted] = useState<boolean>(false);
-  const [highlightedBox, setHighlightedBox] = useState<string | null>("BOX-01");
+  const [highlightedBox, setHighlightedBox] = useState<string | null>(null);
   const [splitSync, setSplitSync] = useState<boolean>(false);
   const [heatmapEnabled, setHeatmapEnabled] = useState<boolean>(false);
   const [volumetric3dOpen, setVolumetric3dOpen] = useState<boolean>(false);
@@ -78,8 +80,9 @@ export function useRadStudioState() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [assessment, setAssessment] = useState<DiagnosticAssessmentData>(DEFAULT_ASSESSMENT);
-  const [box01, setBox01] = useState<LesionBox>(BOX_01);
-  const [box02, setBox02] = useState<LesionBox>(BOX_02);
+  const [box01, setBox01] = useState<LesionBox | null>(null);
+  const [box02, setBox02] = useState<LesionBox | null>(null);
+  const [report, setReport] = useState<DiagnosticReportData | null>(null);
   const [customTotalSlices, setCustomTotalSlices] = useState<number | null>(null);
   const [reconSpecs, setReconSpecs] = useState<string>("120 kVp • 240 mA • Recon: B60f Sharp • Calibrated HU");
 
@@ -150,16 +153,22 @@ export function useRadStudioState() {
 
   const jumpToBox01 = () => {
     setSeries("axial");
-    setSlice(42);
-    setHighlightedBox("BOX-01");
-    showToast("Navigated to Slice 42 • BOX-01 (RUL Spiculated Nodule)");
+    if (box01) {
+      setSlice(box01.sliceIndex);
+      setHighlightedBox("BOX-01");
+      showToast(`Navigated to Slice ${box01.sliceIndex} • BOX-01 (${box01.label})`);
+    } else {
+      showToast("No focal nodule detected on this study");
+    }
   };
 
   const jumpToBox02 = () => {
     setSeries("axial");
-    setSlice(65);
-    setHighlightedBox("BOX-02");
-    showToast("Navigated to Slice 65 • BOX-02 (LLL Subpleural Nodule)");
+    if (box02) {
+      setSlice(box02.sliceIndex);
+      setHighlightedBox("BOX-02");
+      showToast(`Navigated to Slice ${box02.sliceIndex} • BOX-02 (${box02.label})`);
+    }
   };
 
   const triggerEhrSync = () => {
@@ -181,74 +190,31 @@ export function useRadStudioState() {
     const numSlices = dataset.numSlices;
     setCustomTotalSlices(numSlices);
 
-    const targetSlice =
-      summary?.peakSlice && summary.peakSlice <= numSlices
-        ? summary.peakSlice
-        : Math.max(1, Math.floor(numSlices / 2));
+    // Compute real 3D volumetric analysis & ACR Lung-RADS v2022 from actual voxel data
+    const analysis = analyzeDicomDataset(dataset);
+
+    setAssessment(analysis.assessment);
+    setReport(analysis.report);
+    setBox01(analysis.box01);
+    setBox02(analysis.box02);
+    setHighlightedBox(analysis.box01 ? "BOX-01" : null);
+
+    const targetSlice = analysis.box01
+      ? analysis.box01.sliceIndex
+      : summary?.peakSlice && summary.peakSlice <= numSlices
+      ? summary.peakSlice
+      : Math.max(1, Math.floor(numSlices / 2));
     setSlice(targetSlice);
 
-    if (summary) {
-      setAssessment({
-        accessionNumber: summary.accessionNumber,
-        protocol: summary.protocol,
-        lungRadsCurrent: summary.lungRads,
-        lungRadsPrior: "Prior 2024: Lung-RADS 3",
-        priorYear: 2024,
-        nodesStatus: "Nodes: Benign",
-        malignancyProbability: summary.malignancyProb,
-        thresholdIntervention: 65,
-        aucScore: 0.941,
-        volumeCm3: summary.volumeCm3,
-        densityHu: summary.meanHu,
-        max2dMm: summary.primaryNoduleMm,
-        site: summary.site,
-        vdtDays: summary.vdtDays,
-        riskExpansionLabel: summary.vdtDays < 180 ? "High Risk Expansion" : "Indeterminate Growth",
-        fhirReady: true,
-      });
-      setBox01({
-        id: "BOX-01",
-        label: `${summary.site} Nodule`,
-        sliceIndex: targetSlice,
-        diameterMm: summary.primaryNoduleMm,
-        coordinates: [0.38, 0.62, 0.49],
-        huAttenuation: summary.meanHu,
-        volumeCm3: summary.volumeCm3,
-        vdtDays: summary.vdtDays,
-        site: summary.site,
-        riskCategory: summary.lungRads,
-      });
-      setReconSpecs(`${summary.kvp} kVp • ${summary.ma} mA • Recon: ${summary.reconKernel} • Native DICOM`);
-    } else {
-      const firstSlice = dataset.slices[0];
-      setAssessment({
-        accessionNumber: dataset.accessionNumber || `ACC-${Math.floor(10000 + Math.random() * 90000)}`,
-        protocol: dataset.seriesDescription || "CT-THORAX-VOLUMETRIC",
-        lungRadsCurrent: "Lung-RADS 4B: High Suspicion",
-        lungRadsPrior: "Prior: Not Available",
-        priorYear: 2024,
-        nodesStatus: "Nodes: Evaluated",
-        malignancyProbability: 82.5,
-        thresholdIntervention: 65,
-        aucScore: 0.941,
-        volumeCm3: 0.42,
-        densityHu: 45,
-        max2dMm: 14.2,
-        site: "Right Lung",
-        vdtDays: 118,
-        riskExpansionLabel: "High Suspicion",
-        fhirReady: true,
-      });
-      setReconSpecs(
-        `${dataset.kvp || 120} kVp • ${dataset.ma || 240} mA • Recon: ${
-          dataset.reconKernel || firstSlice?.reconKernel || "B60f Sharp"
-        } • Native DICOM`
-      );
-    }
+    setReconSpecs(
+      `${dataset.kvp || 120} kVp • ${dataset.ma || 240} mA • Recon: ${
+        dataset.reconKernel || dataset.slices[0]?.reconKernel || "B60f Sharp"
+      } • MedGemma 1.5 3D Quantification`
+    );
 
     setUploadModalOpen(false);
     showToast(
-      `✓ Ingested DICOM ${dataset.seriesDescription || "Series"}: ${numSlices} real slices loaded`
+      `✓ Ingested DICOM ${dataset.seriesDescription || "Series"}: MedGemma analysis complete (${numSlices} slices)`
     );
   };
 
@@ -297,6 +263,7 @@ export function useRadStudioState() {
     jumpToBox01,
     jumpToBox02,
     assessment,
+    report,
     box01,
     box02,
   };

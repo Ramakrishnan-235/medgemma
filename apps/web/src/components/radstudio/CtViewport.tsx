@@ -10,6 +10,7 @@ import type {
   UploadedStudyData,
 } from "./types";
 import { renderSliceToRgba, calculateHu, processDicomUpload } from "./dicom-loader";
+import { analyzeDicomDataset } from "./clinical-analyzer";
 
 interface CtViewportProps {
   activeDataset?: DicomSeriesDataset | null;
@@ -40,8 +41,8 @@ interface CtViewportProps {
   onOpen3dView: () => void;
   onToast: (msg: string) => void;
   reconSpecs?: string;
-  box01: LesionBox;
-  box02: LesionBox;
+  box01?: LesionBox | null;
+  box02?: LesionBox | null;
 }
 
 export function CtViewport({
@@ -182,26 +183,11 @@ export function CtViewport({
         setUploadProgressText(`${pct}% • ${stage}`);
       });
 
-      const firstSlice = dataset.slices[0];
-      const middleIdx = Math.max(1, Math.floor(dataset.numSlices / 2));
+      const analysis = analyzeDicomDataset(dataset);
       const summary: UploadedStudyData = {
+        ...analysis.summary,
         fileName: fileArray[0].name,
         fileCount: fileArray.length,
-        accessionNumber: dataset.accessionNumber || `ACC-${Math.floor(10000 + Math.random() * 90000)}`,
-        protocol: dataset.seriesDescription || "CT Thorax Volumetric",
-        numSlices: dataset.numSlices,
-        sliceThicknessMm: firstSlice?.sliceThickness || 1.0,
-        kvp: dataset.kvp || 120,
-        ma: dataset.ma || 240,
-        reconKernel: dataset.reconKernel || "B60f Sharp",
-        lungRads: "Lung-RADS 4B: High Suspicion",
-        malignancyProb: 84.2,
-        primaryNoduleMm: 14.2,
-        peakSlice: middleIdx,
-        volumeCm3: 0.42,
-        meanHu: 45,
-        vdtDays: 118,
-        site: "RUL Apical",
       };
 
       if (onDicomUploadSuccess) {
@@ -245,12 +231,12 @@ export function CtViewport({
   };
 
   // Lesion opacity based on proximity to target slice
-  const sliceDistanceBox01 = Math.abs(slice - box01.sliceIndex);
-  const showBox01 = isStudyLoaded && series === "axial" && sliceDistanceBox01 <= 6;
+  const sliceDistanceBox01 = box01 ? Math.abs(slice - box01.sliceIndex) : 999;
+  const showBox01 = isStudyLoaded && Boolean(box01) && series === "axial" && sliceDistanceBox01 <= 6;
   const opacityBox01 = showBox01 ? Math.max(0.2, 1 - sliceDistanceBox01 * 0.15) : 0;
 
-  const sliceDistanceBox02 = Math.abs(slice - box02.sliceIndex);
-  const showBox02 = isStudyLoaded && series === "axial" && sliceDistanceBox02 <= 6;
+  const sliceDistanceBox02 = box02 ? Math.abs(slice - box02.sliceIndex) : 999;
+  const showBox02 = isStudyLoaded && Boolean(box02) && series === "axial" && sliceDistanceBox02 <= 6;
   const opacityBox02 = showBox02 ? Math.max(0.2, 1 - sliceDistanceBox02 * 0.15) : 0;
 
   return (
@@ -575,7 +561,7 @@ export function CtViewport({
             />
 
             {/* Visual Grounding Lesion Box 01 */}
-            {showBox01 && (
+            {showBox01 && box01 && (
               <div
                 style={{
                   position: "absolute",
@@ -600,7 +586,7 @@ export function CtViewport({
             )}
 
             {/* Visual Grounding Lesion Box 02 */}
-            {showBox02 && (
+            {showBox02 && box02 && (
               <div
                 style={{
                   position: "absolute",
@@ -693,16 +679,20 @@ export function CtViewport({
                 />
                 {totalSlices > 1 && (
                   <>
-                    <div
-                      title="BOX-01 Target Slice"
-                      style={{ left: `${(box01.sliceIndex / totalSlices) * 100}%` }}
-                      className="absolute w-2 h-2 -top-0.5 rounded-full bg-red-500 border border-white pointer-events-none"
-                    />
-                    <div
-                      title="BOX-02 Target Slice"
-                      style={{ left: `${(box02.sliceIndex / totalSlices) * 100}%` }}
-                      className="absolute w-2 h-2 -top-0.5 rounded-full bg-amber-500 border border-white pointer-events-none"
-                    />
+                    {box01 && (
+                      <div
+                        title="BOX-01 Target Slice"
+                        style={{ left: `${(box01.sliceIndex / totalSlices) * 100}%` }}
+                        className="absolute w-2 h-2 -top-0.5 rounded-full bg-red-500 border border-white pointer-events-none"
+                      />
+                    )}
+                    {box02 && (
+                      <div
+                        title="BOX-02 Target Slice"
+                        style={{ left: `${(box02.sliceIndex / totalSlices) * 100}%` }}
+                        className="absolute w-2 h-2 -top-0.5 rounded-full bg-amber-500 border border-white pointer-events-none"
+                      />
+                    )}
                   </>
                 )}
               </div>

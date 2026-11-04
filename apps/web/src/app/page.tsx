@@ -101,6 +101,9 @@ export default function MedGemmaRadStudioPage() {
             onJumpBox02={state.jumpToBox02}
             currentSlice={state.slice}
             hasStudy={state.hasStudy}
+            report={state.report}
+            box01={state.box01}
+            box02={state.box02}
           />
         </section>
       </main>

@@ -133,5 +133,91 @@ describe("MedGemma RadStudio Suite", () => {
     const rgba = renderSliceToRgba(slice);
     expect(rgba.length).toBe(128 * 128 * 4);
   });
+
+  it("dynamically analyzes 3D DICOM volume and computes real physical measurements and Lung-RADS", async () => {
+    const { generateSyntheticThoracicCtSlice } = await import("./dicom-loader");
+    const { analyzeDicomDataset } = await import("./clinical-analyzer");
+    const rows = 128;
+    const cols = 128;
+    const numSlices = 20;
+    const peakSlice = 10;
+
+    const slices = [];
+    for (let i = 1; i <= numSlices; i++) {
+      slices.push({
+        sliceIndex: i,
+        instanceNumber: i,
+        sliceLocation: -140 + (i - 1) * 1.5,
+        rows,
+        cols,
+        pixelData: generateSyntheticThoracicCtSlice(i, numSlices, rows, cols, peakSlice),
+        rescaleSlope: 1,
+        rescaleIntercept: -1024,
+        windowCenter: -600,
+        windowWidth: 1500,
+        pixelSpacing: [0.75, 0.75] as [number, number],
+        sliceThickness: 1.5,
+        sopInstanceUid: `test-sop-${i}`,
+      });
+    }
+
+    const dataset = {
+      seriesInstanceUid: "series-test-3d",
+      seriesDescription: "Thoracic CT High Resolution",
+      modality: "CT",
+      numSlices,
+      slices,
+      reconKernel: "B60f Sharp",
+      accessionNumber: "ACC-TEST-3D",
+    };
+
+    const result = analyzeDicomDataset(dataset);
+
+    // Bounding Box 01 should be computed from actual voxel cluster
+    expect(result.box01 !== null).toBe(true);
+    expect(result.box01!.sliceIndex).toBeGreaterThanOrEqual(1);
+    expect(result.box01!.sliceIndex).toBeLessThanOrEqual(numSlices);
+    expect(result.box01!.diameterMm).toBeGreaterThan(0);
+    expect(result.box01!.volumeCm3).toBeGreaterThan(0);
+    expect(typeof result.box01!.huAttenuation).toBe("number");
+    expect(result.box01!.coordinates[0]).toBeGreaterThanOrEqual(0);
+    expect(result.box01!.coordinates[1]).toBeGreaterThanOrEqual(0);
+
+    // Diagnostic Assessment should be driven by the computed nodule
+    expect(result.assessment.lungRadsCurrent).toContain("Lung-RADS");
+    expect(result.assessment.malignancyProbability).toBeGreaterThan(0);
+    expect(result.assessment.max2dMm).toBe(result.box01!.diameterMm);
+    expect(result.assessment.volumeCm3).toBe(result.box01!.volumeCm3);
+
+    // Diagnostic Report should contain synthesized text with actual values
+    expect(result.report.hasNodule).toBe(true);
+    expect(result.report.lungsFinding).toContain(String(result.box01!.diameterMm));
+    expect(result.report.impressions.length).toBeGreaterThan(0);
+    expect(result.report.recommendation.length).toBeGreaterThan(0);
+  });
+
+  it("handles negative study baseline without nodules correctly", async () => {
+    const fs = await import("fs");
+    const { parseDicomBuffer } = await import("./dicom-loader");
+    const { analyzeDicomDataset } = await import("./clinical-analyzer");
+
+    const filePath = "./apps/web/public/samples/CT_small.dcm";
+    const fileBytes = new Uint8Array(fs.readFileSync(filePath));
+    const slice = parseDicomBuffer(fileBytes, "CT_small.dcm");
+
+    const dataset = {
+      seriesInstanceUid: "series-real-small",
+      seriesDescription: "Real CT Part 10 Small",
+      modality: "CT",
+      numSlices: 1,
+      slices: [slice],
+    };
+
+    const result = analyzeDicomDataset(dataset);
+    expect(result.assessment).toBeDefined();
+    expect(result.report).toBeDefined();
+    expect(result.summary).toBeDefined();
+    expect(result.assessment.protocol).toBe("Real CT Part 10 Small");
+  });
 });
 

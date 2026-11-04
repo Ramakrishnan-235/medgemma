@@ -3,6 +3,7 @@
 import React, { useState, useRef } from "react";
 import type { UploadedStudyData, DicomSeriesDataset, DicomSlice } from "./types";
 import { processDicomUpload, generateSyntheticThoracicCtSlice } from "./dicom-loader";
+import { analyzeDicomDataset } from "./clinical-analyzer";
 
 interface DicomUploadModalProps {
   isOpen: boolean;
@@ -210,7 +211,9 @@ export function DicomUploadModal({
           reconKernel: preset.reconKernel,
         };
 
+        const analysis = analyzeDicomDataset(presetDataset);
         const presetSummary: UploadedStudyData = {
+          ...analysis.summary,
           fileName: `${preset.accession}_${preset.protocol}.dcm`,
           fileCount: preset.slices,
           accessionNumber: preset.accession,
@@ -220,14 +223,6 @@ export function DicomUploadModal({
           kvp: preset.kvp,
           ma: preset.ma,
           reconKernel: preset.reconKernel,
-          lungRads: preset.lungRads,
-          malignancyProb: preset.malignancyProb,
-          primaryNoduleMm: preset.noduleMm,
-          peakSlice: preset.peakSlice,
-          volumeCm3: preset.volumeCm3,
-          meanHu: preset.meanHu,
-          vdtDays: preset.vdtDays,
-          site: preset.site,
         };
 
         setProgressPercent(100);
@@ -245,27 +240,13 @@ export function DicomUploadModal({
         setCurrentStage(stage);
       });
 
-      const firstSlice = dataset.slices[0];
-      const middleIdx = Math.max(1, Math.floor(dataset.numSlices / 2));
-
+      const analysis = analyzeDicomDataset(dataset);
       const summary: UploadedStudyData = {
+        ...analysis.summary,
         fileName: selectedFiles[0]?.name || "DICOM_STUDY.dcm",
         fileCount: selectedFiles.length,
-        accessionNumber: `ACC-${Math.floor(10000 + Math.random() * 90000)}`,
+        accessionNumber: dataset.accessionNumber || `ACC-${Math.floor(10000 + Math.random() * 90000)}`,
         protocol: dataset.seriesDescription || "CT-CHEST-VOLUMETRIC",
-        numSlices: dataset.numSlices,
-        sliceThicknessMm: firstSlice?.sliceThickness || 1.0,
-        kvp: 120,
-        ma: 240,
-        reconKernel: dataset.reconKernel || "B60f Sharp",
-        lungRads: "Lung-RADS 4B: High Suspicion",
-        malignancyProb: 84.2,
-        primaryNoduleMm: 14.2,
-        peakSlice: middleIdx,
-        volumeCm3: 0.42,
-        meanHu: 45,
-        vdtDays: 118,
-        site: "RUL Apical",
       };
 
       setProgressPercent(100);
@@ -294,24 +275,13 @@ export function DicomUploadModal({
         setProgressPercent(pct);
         setCurrentStage(stg);
       });
+      const analysis = analyzeDicomDataset(dataset);
       const summary: UploadedStudyData = {
+        ...analysis.summary,
         fileName: "CT_small.dcm",
         fileCount: 1,
-        accessionNumber: "ACC-REAL-501",
+        accessionNumber: dataset.accessionNumber || "ACC-REAL-501",
         protocol: dataset.seriesDescription || "CT Axial Part-10",
-        numSlices: dataset.numSlices,
-        sliceThicknessMm: 3.0,
-        kvp: 120,
-        ma: 240,
-        reconKernel: "STANDARD",
-        lungRads: "Lung-RADS 2: Benign Appearance",
-        malignancyProb: 6.4,
-        primaryNoduleMm: 5.2,
-        peakSlice: 1,
-        volumeCm3: 0.15,
-        meanHu: 35,
-        vdtDays: 520,
-        site: "Standard Axial CT",
       };
       setProgressPercent(100);
       setIsProcessing(false);
