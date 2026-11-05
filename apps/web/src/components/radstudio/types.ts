@@ -28,11 +28,13 @@ export interface LesionBox {
   sliceIndex: number;
   diameterMm: number;
   coordinates: [number, number, number]; // [x, y, z] normalized
+  box_2d_1000?: [number, number, number, number]; // MedGemma [ymin, xmin, ymax, xmax] (0-1000)
   huAttenuation: number;
   volumeCm3: number;
   vdtDays: number;
   site: string;
   riskCategory: string;
+  isAiGenerated?: boolean;
 }
 
 export interface DiagnosticAssessmentData {

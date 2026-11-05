@@ -43,6 +43,8 @@ interface CtViewportProps {
   reconSpecs?: string;
   box01?: LesionBox | null;
   box02?: LesionBox | null;
+  isInferring?: boolean;
+  inferenceStage?: string;
 }
 
 export function CtViewport({
@@ -76,6 +78,8 @@ export function CtViewport({
   reconSpecs,
   box01,
   box02,
+  isInferring = false,
+  inferenceStage = "idle",
 }: CtViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rgbaBufferRef = useRef<Uint8ClampedArray | null>(null);
@@ -514,6 +518,37 @@ export function CtViewport({
             </div>
           )}
 
+          {/* AI Inference Scanner Beam & Status Overlay */}
+          {isInferring && (
+            <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden flex flex-col items-center justify-center">
+              <div className="absolute inset-0 bg-emerald-950/20 backdrop-blur-[1px]" />
+              <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_15px_#34d399] animate-pulse absolute top-1/3 left-0 right-0" />
+              <div className="relative bg-gray-950/95 border border-emerald-500/80 shadow-[0_0_35px_rgba(16,185,129,0.3)] rounded-2xl px-6 py-5 flex flex-col items-center gap-3 max-w-sm text-center">
+                <div className="relative w-12 h-12 flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full border-2 border-emerald-400/30 animate-ping" />
+                  <div className="w-10 h-10 rounded-full bg-emerald-950 border border-emerald-400 flex items-center justify-center text-emerald-400">
+                    <svg className="w-6 h-6 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                      <path d="M12 2a10 10 0 0 1 10 10" />
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-emerald-300 font-mono tracking-wider uppercase flex items-center justify-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    MedGemma 1.5 4B Neural Inference
+                  </div>
+                  <p className="text-[12px] text-gray-200 mt-1.5 font-medium leading-relaxed">
+                    {inferenceStage || "Executing MedGemma 1.5 SigLIP Vision Model on RTX 2050..."}
+                  </p>
+                  <p className="text-[10px] text-gray-400 font-mono mt-1">
+                    CUDA:0 (4-bit NF4) • Extracting 2D/3D Location Tokens
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Anatomical Orientation HUD Overlays */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 text-[11px] font-mono font-bold tracking-widest text-gray-400/80 pointer-events-none uppercase z-20">
             ANTERIOR
@@ -563,19 +598,39 @@ export function CtViewport({
             {/* Visual Grounding Lesion Box 01 */}
             {showBox01 && box01 && (
               <div
-                style={{
-                  position: "absolute",
-                  left: `${box01.coordinates[0] * 100}%`,
-                  top: `${box01.coordinates[1] * 100}%`,
-                  transform: "translate(-50%, -50%)",
-                  opacity: opacityBox01,
-                }}
+                style={
+                  box01.box_2d_1000
+                    ? {
+                        position: "absolute",
+                        left: `${(box01.box_2d_1000[1] / 1000) * 100}%`,
+                        top: `${(box01.box_2d_1000[0] / 1000) * 100}%`,
+                        width: `${Math.max(5, ((box01.box_2d_1000[3] - box01.box_2d_1000[1]) / 1000) * 100)}%`,
+                        height: `${Math.max(5, ((box01.box_2d_1000[2] - box01.box_2d_1000[0]) / 1000) * 100)}%`,
+                        opacity: opacityBox01,
+                      }
+                    : {
+                        position: "absolute",
+                        left: `${box01.coordinates[0] * 100}%`,
+                        top: `${box01.coordinates[1] * 100}%`,
+                        transform: "translate(-50%, -50%)",
+                        opacity: opacityBox01,
+                      }
+                }
                 className="pointer-events-none transition-opacity duration-300 z-10"
               >
-                <div className="relative w-16 h-16 border-2 border-red-500 rounded-sm bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.5)]">
-                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-600 text-white text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1">
+                <div
+                  className={`relative ${
+                    box01.box_2d_1000 ? "w-full h-full" : "w-16 h-16"
+                  } border-2 border-red-500 rounded-xs bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.5)]`}
+                >
+                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-600 text-white text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    BOX-01: {box01.diameterMm}mm
+                    <span>BOX-01: {box01.diameterMm}mm</span>
+                    {box01.isAiGenerated && (
+                      <span className="bg-red-950/80 text-emerald-300 text-[8px] px-1 py-0.2 rounded font-sans uppercase font-bold tracking-tight border border-emerald-400/30">
+                        MedGemma 4B
+                      </span>
+                    )}
                   </div>
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="w-full h-px bg-red-400/80" />

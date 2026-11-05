@@ -459,3 +459,23 @@ export function generateSyntheticThoracicCtSlice(
 
   return pixelData;
 }
+
+/**
+ * Encodes a CT DicomSlice into a standard PNG base64 string using standard lung window (-600 / 1500 HU).
+ * Enables feeding the real slice directly to MedGemma vision encoder.
+ */
+export function sliceToPngBase64(slice: DicomSlice): string {
+  if (typeof document === "undefined") {
+    return "";
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = slice.cols;
+  canvas.height = slice.rows;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  const rgba = renderSliceToRgba(slice, -600, 1500);
+  const imgData = ctx.createImageData(slice.cols, slice.rows);
+  imgData.data.set(rgba);
+  ctx.putImageData(imgData, 0, 0);
+  return canvas.toDataURL("image/png");
+}

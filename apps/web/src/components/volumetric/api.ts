@@ -521,5 +521,58 @@ export async function fetchFreeFormReport(
   return null;
 }
 
+export interface SliceInferenceResult {
+  status: string;
+  model_checkpoint: string;
+  inference_time_ms: number;
+  slice_index: number;
+  detections: Array<{
+    slice_index: number;
+    label: string;
+    box_2d_1000: [number, number, number, number];
+    confidence: number;
+    physical_size: {
+      width_mm: number;
+      height_mm: number;
+      mean_diameter_mm: number;
+    };
+  }>;
+  lung_rads_assessment: {
+    category: string;
+    malignancy_risk_score: number;
+    recommendation: string;
+  };
+  narrative: string;
+}
+
+export async function inferSliceWithMedGemma(params: {
+  imageBase64: string;
+  sliceIndex: number;
+  pixelSpacing?: [number, number];
+  originalShape?: [number, number];
+  mockMode?: boolean;
+}): Promise<SliceInferenceResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/ct/infer-slice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_base64: params.imageBase64,
+        slice_index: params.sliceIndex,
+        pixel_spacing: params.pixelSpacing || [0.70, 0.70],
+        original_shape: params.originalShape || [512, 512],
+        mock_mode: params.mockMode ?? false,
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (res.ok) {
+      return (await res.json()) as SliceInferenceResult;
+    }
+  } catch (err) {
+    console.warn("Direct slice inference API error:", err);
+  }
+  return null;
+}
+
 
 

@@ -75,6 +75,8 @@ export default function MedGemmaRadStudioPage() {
           reconSpecs={state.reconSpecs}
           box01={state.box01}
           box02={state.box02}
+          isInferring={state.isInferring}
+          inferenceStage={state.inferenceStage}
         />
 
         {/* Column 3: Right Diagnostic Assessment & Structured Report Panel */}
