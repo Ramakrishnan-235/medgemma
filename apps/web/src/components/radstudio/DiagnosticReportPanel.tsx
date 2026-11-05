@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import type { DiagnosticReportData, LesionBox } from "./types";
+import { streamVQA } from "../volumetric/api";
 
 interface DiagnosticReportPanelProps {
   expandedSections: {
@@ -30,6 +31,29 @@ export function DiagnosticReportPanel({
   box01,
   box02,
 }: DiagnosticReportPanelProps) {
+  const [vqaInput, setVqaInput] = useState("");
+  const [vqaAnswer, setVqaAnswer] = useState<string | null>(null);
+  const [vqaStreaming, setVqaStreaming] = useState(false);
+
+  const handleAskVqa = async (questionText?: string) => {
+    const q = questionText || vqaInput;
+    if (!q.trim() || vqaStreaming) return;
+    setVqaStreaming(true);
+    setVqaAnswer("");
+    try {
+      await streamVQA({
+        studyId: report?.accessionNumber || "ACC-89432",
+        question: `Slice ${currentSlice}: ${q}`,
+        mockMode: true,
+        onToken: (tok) => setVqaAnswer((prev) => (prev || "") + tok),
+        onDone: () => setVqaStreaming(false),
+        onError: () => setVqaStreaming(false),
+      });
+    } catch {
+      setVqaStreaming(false);
+    }
+  };
+
   if (!hasStudy) {
     return (
       <div className="bg-white rounded-xl border border-gray-200/90 p-4 shadow-2xs space-y-3 select-none flex-1 flex flex-col justify-between overflow-hidden">
@@ -217,6 +241,62 @@ export function DiagnosticReportPanel({
                 {report?.pleuraFinding ||
                   "No pleural effusion. Visceral and parietal pleural surfaces intact without frank chest wall erosion or rib osteolysis."}
               </p>
+            </div>
+          )}
+        </div>
+        {/* SECTION 4: Grounded Narrative Report (Prefix-Cached DAG Output A) */}
+        {report?.narrativeMarkdown && (
+          <div className="rounded-lg border border-indigo-200/80 bg-indigo-50/40 p-2.5 text-xs space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-indigo-900 tracking-wider uppercase font-mono flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
+                MedGemma 1.5 Narrative Report (Output A)
+              </span>
+              <span className="text-[9px] font-mono text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded">
+                Prefix-Cached
+              </span>
+            </div>
+            <div className="text-[11px] text-gray-700 font-mono leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto pr-1 bg-white p-2 rounded border border-indigo-100">
+              {report.narrativeMarkdown}
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 5: Warm-Prefix Interactive VQA Streaming (Output C) */}
+        <div className="rounded-lg border border-gray-200/80 bg-gray-50/60 p-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-gray-800 tracking-wider uppercase font-mono flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              Interactive VQA • Slice {currentSlice}
+            </span>
+            <span className="text-[9px] font-mono text-gray-500">vLLM Stream</span>
+          </div>
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={vqaInput}
+              onChange={(e) => setVqaInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAskVqa();
+                }
+              }}
+              placeholder={`Ask MedGemma about slice ${currentSlice}...`}
+              className="flex-1 text-[11px] px-2.5 py-1 rounded-md border border-gray-200 bg-white text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-gray-400"
+            />
+            <button
+              type="button"
+              disabled={vqaStreaming || !vqaInput.trim()}
+              onClick={() => handleAskVqa()}
+              className="px-2.5 py-1 rounded-md bg-gray-900 text-white text-[11px] font-semibold hover:bg-black disabled:opacity-50 transition cursor-pointer"
+            >
+              {vqaStreaming ? "..." : "Ask"}
+            </button>
+          </div>
+          {vqaAnswer !== null && (
+            <div className="text-[11px] text-gray-800 bg-white p-2 rounded border border-gray-200 leading-relaxed font-mono">
+              {vqaAnswer || <span className="text-gray-400 italic">Streaming tokens from warm prefix...</span>}
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { fetchSliceVQA } from "./api";
+import { fetchSliceVQA, streamVQA } from "./api";
 import { DiagnosticModality, TargetedSliceVQAResponse, VolumetricAnalysisPayload } from "./types";
 
 interface VolumetricSidebarProps {
@@ -40,15 +40,50 @@ export function VolumetricSidebar({
     const q = customQ || vqaQuestion;
     if (!q.trim()) return;
     setVqaLoading(true);
+    setVqaResponse({
+      slice_index: activeSlice,
+      question: q,
+      answer_markdown: "",
+      confidence_score: 0.94,
+      relevant_anatomical_regions: ["Segment VII", "Subcapsular Margin"],
+    });
+
     try {
-      const resp = await fetchSliceVQA({
-        case_id: analysisData?.case_id || "CASE-2026-0894",
-        slice_index: activeSlice,
-        tissue_window: (analysisData?.sequence_preset as any) || "soft_tissue",
+      await streamVQA({
+        studyId: analysisData?.case_id || "STUDY-CT-2026-001",
         question: q,
+        mockMode: true,
+        onToken: (tok) => {
+          setVqaResponse((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  answer_markdown: (prev.answer_markdown || "") + tok,
+                }
+              : {
+                  slice_index: activeSlice,
+                  question: q,
+                  answer_markdown: tok,
+                  confidence_score: 0.94,
+                  relevant_anatomical_regions: ["Segment VII"],
+                }
+          );
+        },
+        onDone: () => {
+          setVqaLoading(false);
+        },
+        onError: async () => {
+          const resp = await fetchSliceVQA({
+            case_id: analysisData?.case_id || "CASE-2026-0894",
+            slice_index: activeSlice,
+            tissue_window: (analysisData?.sequence_preset as any) || "soft_tissue",
+            question: q,
+          });
+          setVqaResponse(resp);
+          setVqaLoading(false);
+        },
       });
-      setVqaResponse(resp);
-    } finally {
+    } catch {
       setVqaLoading(false);
     }
   };

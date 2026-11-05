@@ -1,5 +1,6 @@
 import {
   ClusterStatus,
+  DAGPipelineResponse,
   DiagnosticModality,
   HistogramBarData,
   NormalizedBox1000,
@@ -330,5 +331,195 @@ export async function fetchSliceVQA(
     relevant_anatomical_regions: ["Segment VII", "Liver dome"],
   };
 }
+
+export async function fetchDAGPipeline(params?: {
+  studyId?: string;
+  maxSlices?: number;
+  mockMode?: boolean;
+}): Promise<DAGPipelineResponse> {
+  const studyId = params?.studyId || "STUDY-CT-2026-001";
+  const maxSlices = params?.maxSlices || 64;
+  const mockMode = params?.mockMode ?? true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/ct/dag-pipeline`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        study_id: studyId,
+        max_slices: maxSlices,
+        mock_mode: mockMode,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) {
+      return (await res.json()) as DAGPipelineResponse;
+    }
+  } catch {
+    // Offline fallback
+  }
+
+  return {
+    status: "success",
+    study_id: studyId,
+    slices_processed: maxSlices,
+    token_budget: maxSlices * 256,
+    output_b_lung_rads: {
+      lung_rads_category: "4A",
+      malignancy_risk_score: 0.12,
+      primary_findings: [
+        "9.5 mm solid nodule in the right lower lobe posterior segment.",
+        "Smooth margins without architectural distortion or lymphadenopathy.",
+      ],
+      recommended_follow_up: "3-month low-dose CT or PET-CT examination per ACR Lung-RADS v2022.",
+    },
+    output_d_detections: [
+      {
+        slice_index: 32,
+        label: "Solid Pulmonary Nodule",
+        box_2d: [380, 420, 440, 490],
+        physical_size: {
+          width_mm: 14.2,
+          height_mm: 11.8,
+          mean_diameter_mm: 13.0,
+        },
+        z_coord_mm: 40.0,
+        monai_3d_volume: {
+          volume_mm3: 1050.0,
+          volume_cm3: 1.05,
+          voxel_count: 1720,
+          mean_hu: 42.0,
+          method: "monai_active_contour_fallback",
+        },
+      },
+    ],
+    output_a_narrative_report:
+      "# Chest CT Clinical Evaluation\n\n## Findings\n- Lungs: 9.5 mm solid nodule in right lower lobe (mean 42 HU). Preserved contours.\n\n## Impression\n1. ACR Lung-RADS Category 4A nodule.",
+    spatial_meta: {
+      pixel_spacing_mm: [0.7, 0.7],
+      original_shape: [512, 512],
+      slice_thickness_mm: 1.25,
+      slice_z_mm: Array.from({ length: maxSlices }, (_, i) => i * 1.25),
+    },
+  };
+}
+
+export async function streamVQA(params: {
+  studyId: string;
+  question: string;
+  mockMode?: boolean;
+  onToken: (token: string) => void;
+  onDone?: () => void;
+  onError?: (err: Error) => void;
+}): Promise<void> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/ct/vqa-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        study_id: params.studyId,
+        question: params.question,
+        mock_mode: params.mockMode ?? true,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`VQA stream failed with status ${res.status}`);
+    if (!res.body) throw new Error("No response stream body available");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.replace(/^data:\s*/, "");
+        if (payload === "[DONE]") {
+          params.onDone?.();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.token) {
+            params.onToken(parsed.token);
+          }
+        } catch {
+          params.onToken(payload);
+        }
+      }
+    }
+    params.onDone?.();
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    params.onError?.(error);
+  }
+}
+
+export async function fetchFhirDiagnosticBundle(
+  caseId = "CASE-2026-0894",
+  patientId = "PAT-9842"
+): Promise<any> {
+  try {
+    const url = new URL(`${API_BASE}/api/v1/volumetric/fhir/diagnostic-bundle`);
+    url.searchParams.set("case_id", caseId);
+    url.searchParams.set("patient_id", patientId);
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {
+    // Fallback
+  }
+  return null;
+}
+
+export async function fetchLongitudinalReport(
+  caseId = "CASE-2026-0894",
+  priorDate = "2026-01-15",
+  currentDate = "2026-04-20"
+): Promise<any> {
+  try {
+    const url = new URL(`${API_BASE}/api/v1/volumetric/reports/longitudinal`);
+    url.searchParams.set("case_id", caseId);
+    url.searchParams.set("prior_study_date", priorDate);
+    url.searchParams.set("current_study_date", currentDate);
+    const res = await fetch(url.toString(), { method: "POST" });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {
+    // Fallback
+  }
+  return null;
+}
+
+export async function fetchFreeFormReport(
+  caseId = "CASE-2026-0894",
+  modality: DiagnosticModality = "3d_ct"
+): Promise<any> {
+  try {
+    const url = new URL(`${API_BASE}/api/v1/volumetric/reports/free-form`);
+    url.searchParams.set("case_id", caseId);
+    url.searchParams.set("modality", modality === "wsi" ? "3d_ct" : modality);
+    const res = await fetch(url.toString(), { method: "POST" });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {
+    // Fallback
+  }
+  return null;
+}
+
 
 

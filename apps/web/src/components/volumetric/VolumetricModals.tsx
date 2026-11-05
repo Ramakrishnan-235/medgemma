@@ -153,16 +153,18 @@ export function VolumetricModals({
 
               <div className="rounded-[2rem] bg-[#EFEDF4]/60 p-4 border border-[#292524]/5 text-xs space-y-1 font-mono leading-relaxed text-[#292524]">
                 <div className="font-semibold font-sans mb-1">FASTAPI PIPELINE ENDPOINTS:</div>
+                <div>POST http://localhost:8000/api/v1/ct/dag-pipeline</div>
+                <div>POST http://localhost:8000/api/v1/ct/vqa-stream</div>
+                <div>POST http://localhost:8000/api/v1/volumetric/fhir/diagnostic-bundle</div>
                 <div>POST http://localhost:8000/api/v1/volumetric/analyze-volume</div>
-                <div>POST http://localhost:8000/api/v1/ct/analyze-volume</div>
                 <div className="text-[#78716C] pt-1">
-                  1. SimpleITK calibrates 3D coordinates &amp; sequence tags
+                  1. MedSigLIP 400M + Gemma 3 128k Prefix-Cached Dual-Path DAG
                 </div>
                 <div className="text-[#78716C]">
-                  2. MONAI + NumPy computes 3D lesion span &amp; volume (cm³)
+                  2. MONAI + NumPy Active-Contour 3D lesion span &amp; volume (cm³)
                 </div>
                 <div className="text-[#78716C]">
-                  3. 40% Sparse Attention Gate samples 64 slices for MedGemma 1.5
+                  3. XGrammar Pydantic Micro-Schemas + Unconstrained SSE VQA Stream
                 </div>
               </div>
 

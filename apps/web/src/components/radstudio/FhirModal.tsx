@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import type { DiagnosticAssessmentData, LesionBox } from "./types";
+import { fetchFhirDiagnosticBundle } from "../volumetric/api";
 
 interface FhirModalProps {
   isOpen: boolean;
@@ -19,6 +20,22 @@ export function FhirModal({
   onToast,
 }: FhirModalProps) {
   const [copied, setCopied] = useState(false);
+  const [liveBundle, setLiveBundle] = useState<any>(null);
+  const [isLive, setIsLive] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchFhirDiagnosticBundle(assessment.accessionNumber || "ACC-89432", "PAT-49204").then((bundle) => {
+      if (!cancelled && bundle) {
+        setLiveBundle(bundle);
+        setIsLive(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, assessment.accessionNumber]);
 
   if (!isOpen) return null;
 
@@ -132,7 +149,7 @@ export function FhirModal({
     ],
   };
 
-  const jsonStr = JSON.stringify(fhirBundle, null, 2);
+  const jsonStr = JSON.stringify(liveBundle || fhirBundle, null, 2);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(jsonStr);
@@ -156,6 +173,11 @@ export function FhirModal({
             <h3 id="fhir-dialog-title" className="text-sm font-bold text-gray-900 font-mono">
               HL7 FHIR R4 • US Core DiagnosticReport Bundle
             </h3>
+            {isLive && (
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                Live Backend API
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}

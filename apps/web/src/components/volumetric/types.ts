@@ -125,4 +125,42 @@ export interface TargetedSliceVQAResponse {
   relevant_anatomical_regions?: string[];
 }
 
+export interface DAGPipelineResponse {
+  status: string;
+  study_id: string;
+  slices_processed: number;
+  token_budget: number;
+  output_b_lung_rads: {
+    lung_rads_category: string;
+    malignancy_risk_score: number;
+    primary_findings: string[];
+    recommended_follow_up: string;
+  };
+  output_d_detections: Array<{
+    slice_index: number;
+    label: string;
+    box_2d: [number, number, number, number];
+    physical_size?: {
+      width_mm: number;
+      height_mm: number;
+      mean_diameter_mm: number;
+    };
+    z_coord_mm?: number;
+    monai_3d_volume?: {
+      volume_mm3: number;
+      volume_cm3: number;
+      voxel_count: number;
+      mean_hu: number;
+      method: string;
+    };
+  }>;
+  output_a_narrative_report: string;
+  spatial_meta: {
+    pixel_spacing_mm: [number, number];
+    original_shape: [number, number];
+    slice_thickness_mm: number;
+    slice_z_mm: number[];
+  };
+}
+
 

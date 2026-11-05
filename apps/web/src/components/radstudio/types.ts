@@ -97,12 +97,14 @@ export interface DicomSlice {
 }
 
 export interface DiagnosticReportData {
+  accessionNumber?: string;
   lungsFinding: string;
   mediastinumFinding: string;
   pleuraFinding: string;
   impressions: string[];
   recommendation: string;
   hasNodule: boolean;
+  narrativeMarkdown?: string;
   noduleDetails?: {
     sliceIndex: number;
     diameterMm: number;
