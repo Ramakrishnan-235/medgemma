@@ -531,6 +531,7 @@ export interface SliceInferenceResult {
     label: string;
     box_2d_1000: [number, number, number, number];
     confidence: number;
+    site?: string;
     physical_size: {
       width_mm: number;
       height_mm: number;
@@ -551,6 +552,7 @@ export async function inferSliceWithMedGemma(params: {
   pixelSpacing?: [number, number];
   originalShape?: [number, number];
   mockMode?: boolean;
+  voxelFinding?: Record<string, unknown> | null;
 }): Promise<SliceInferenceResult | null> {
   try {
     const res = await fetch(`${API_BASE}/api/v1/ct/infer-slice`, {
@@ -562,8 +564,9 @@ export async function inferSliceWithMedGemma(params: {
         pixel_spacing: params.pixelSpacing || [0.70, 0.70],
         original_shape: params.originalShape || [512, 512],
         mock_mode: params.mockMode ?? false,
+        voxel_finding: params.voxelFinding ?? null,
       }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000),
     });
     if (res.ok) {
       return (await res.json()) as SliceInferenceResult;

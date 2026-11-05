@@ -74,6 +74,8 @@ export interface UploadedStudyData {
   meanHu: number;
   vdtDays: number;
   site: string;
+  box01?: LesionBox | null;
+  box02?: LesionBox | null;
 }
 
 export interface DicomSlice {

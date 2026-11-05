@@ -1,7 +1,7 @@
 import asyncio
 import os
 import time
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
@@ -512,6 +512,7 @@ class SliceInferenceRequest(BaseModel):
     pixel_spacing: list[float] = Field(default_factory=lambda: [0.70, 0.70])
     original_shape: list[int] = Field(default_factory=lambda: [512, 512])
     mock_mode: bool = Field(default=False)
+    voxel_finding: Optional[dict[str, Any]] = Field(default=None, description="Pre-computed 3D voxel ROI metrics")
 
 
 @ct_router.post("/infer-slice")
@@ -528,6 +529,7 @@ async def infer_ct_slice(payload: SliceInferenceRequest):
         pixel_spacing=payload.pixel_spacing,
         original_shape=(payload.original_shape[0], payload.original_shape[1]) if len(payload.original_shape) >= 2 else (512, 512),
         mock_mode=payload.mock_mode,
+        voxel_finding=payload.voxel_finding,
     )
 
 

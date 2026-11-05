@@ -235,7 +235,25 @@ export function useRadStudioState() {
       const activeSliceObj = dataset.slices[targetSlice - 1] || dataset.slices[0];
       const pngBase64 = activeSliceObj ? sliceToPngBase64(activeSliceObj) : "";
 
-      setInferenceStage("Running MedGemma 1.5 4B neural detection on CUDA:0 (RTX 2050)...");
+      const primaryFinding = summary?.box01;
+      const voxelFinding = primaryFinding ? {
+        sliceIndex: primaryFinding.sliceIndex,
+        diameterMm: primaryFinding.diameterMm,
+        meanHu: primaryFinding.huAttenuation,
+        site: primaryFinding.site,
+        coordinates: primaryFinding.coordinates,
+        volumeCm3: primaryFinding.volumeCm3,
+        riskCategory: primaryFinding.riskCategory,
+      } : (summary?.primaryNoduleMm ? {
+        sliceIndex: targetSlice,
+        diameterMm: summary.primaryNoduleMm,
+        meanHu: summary.meanHu,
+        site: summary.site,
+        volumeCm3: summary.volumeCm3,
+        riskCategory: summary.lungRads,
+      } : undefined);
+
+      setInferenceStage("Running MedGemma 1.5 4B neural interpretation on CUDA:0 (RTX 2050)...");
 
       const res = await inferSliceWithMedGemma({
         imageBase64: pngBase64,
@@ -243,6 +261,7 @@ export function useRadStudioState() {
         pixelSpacing: activeSliceObj?.pixelSpacing || [0.7, 0.7],
         originalShape: [activeSliceObj?.rows || 512, activeSliceObj?.cols || 512],
         mockMode: false,
+        voxelFinding,
       });
 
       if (res && res.detections && res.detections.length > 0) {
@@ -251,25 +270,30 @@ export function useRadStudioState() {
         const centerX = (xmin + xmax) / 2000;
         const centerY = (ymin + ymax) / 2000;
         const centerZ = targetSlice / Math.max(1, numSlices);
-        const meanDiam = det.physical_size?.mean_diameter_mm || 14.2;
-        const vol = Number(((4 / 3) * Math.PI * Math.pow(meanDiam / 20, 3)).toFixed(2));
+        const meanDiam = det.physical_size?.mean_diameter_mm || summary?.primaryNoduleMm || 14.2;
+        const vol = summary?.volumeCm3 || Number(((4 / 3) * Math.PI * Math.pow(meanDiam / 20, 3)).toFixed(2));
+        const site = det.site || primaryFinding?.site || summary?.site || "Pulmonary Parenchyma";
+        const hu = primaryFinding?.huAttenuation ?? summary?.meanHu ?? 45;
 
         const modelBox: LesionBox = {
           id: "BOX-01",
-          label: det.label || "MedGemma Detected Lesion",
+          label: det.label || `${site} Nodule`,
           sliceIndex: targetSlice,
           diameterMm: meanDiam,
           coordinates: [centerX, centerY, centerZ],
           box_2d_1000: det.box_2d_1000,
-          huAttenuation: 45,
+          huAttenuation: hu,
           volumeCm3: vol,
-          vdtDays: 118,
-          site: "Right Upper Lobe Apical",
+          vdtDays: primaryFinding?.vdtDays || summary?.vdtDays || 118,
+          site,
           riskCategory: `Lung-RADS ${res.lung_rads_assessment?.category || "4B"}`,
           isAiGenerated: true,
         };
 
         setBox01(modelBox);
+        if (summary?.box02) {
+          setBox02(summary.box02);
+        }
         setHighlightedBox("BOX-01");
 
         setAssessment((prev) => ({
@@ -279,31 +303,33 @@ export function useRadStudioState() {
           malignancyProbability: Math.round((res.lung_rads_assessment?.malignancy_risk_score ?? 0.84) * 1000) / 10,
           max2dMm: meanDiam,
           volumeCm3: vol,
+          site,
         }));
 
         setReport({
           accessionNumber: dataset.accessionNumber || "ACC-89432",
-          lungsFinding: `MedGemma 1.5 4B identified a focal lesion on slice ${targetSlice} measuring ${meanDiam} mm. Estimated physical bounds: ${det.physical_size?.width_mm ?? 14} mm x ${det.physical_size?.height_mm ?? 14} mm. Model inference latency: ${res.inference_time_ms ? res.inference_time_ms.toFixed(0) : "N/A"} ms (${res.model_checkpoint}).`,
+          lungsFinding: res.narrative || `MedGemma 1.5 4B identified a focal lesion on slice ${targetSlice} measuring ${meanDiam} mm in ${site}. Model inference latency: ${res.inference_time_ms ? res.inference_time_ms.toFixed(0) : "N/A"} ms.`,
           mediastinumFinding: "Normal mediastinal contours. Subcentimeter non-enlarged lymph nodes.",
           pleuraFinding: "No pleural effusion or pneumothorax identified.",
           impressions: [
-            `Focal pulmonary nodule on slice ${targetSlice} classified as Lung-RADS ${res.lung_rads_assessment?.category || "4B"}.`,
-            res.lung_rads_assessment?.recommendation || "Chest CT in 3 months",
+            `Focal pulmonary nodule on slice ${targetSlice} in ${site} (${meanDiam} mm).`,
+            `ACR Lung-RADS Category ${res.lung_rads_assessment?.category || "4B"}.`,
+            res.lung_rads_assessment?.recommendation || "Follow-up surveillance per ACR Lung-RADS guidelines.",
           ],
-          recommendation: res.lung_rads_assessment?.recommendation || "Chest CT in 3 months",
+          recommendation: res.lung_rads_assessment?.recommendation || "Follow-up surveillance per ACR Lung-RADS guidelines.",
           hasNodule: true,
           narrativeMarkdown: res.narrative,
           noduleDetails: {
             sliceIndex: targetSlice,
             diameterMm: meanDiam,
             volumeCm3: vol,
-            meanHu: 45,
-            site: "Right Upper Lobe Apical",
+            meanHu: hu,
+            site,
           },
         });
 
         showToast(
-          `✓ MedGemma 1.5 4B Neural Detection complete (${res.inference_time_ms ? res.inference_time_ms.toFixed(0) : "N/A"}ms): Lung-RADS ${res.lung_rads_assessment?.category || "4B"}`
+          `✓ MedGemma 1.5 4B Neural Interpretation complete (${res.inference_time_ms ? res.inference_time_ms.toFixed(0) : "N/A"}ms): Lung-RADS ${res.lung_rads_assessment?.category || "4B"}`
         );
       } else {
         // Fallback to calibrated voxel analysis

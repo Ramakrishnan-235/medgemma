@@ -402,6 +402,8 @@ export function analyzeDicomDataset(dataset: DicomSeriesDataset): ClinicalAnalys
     meanHu: primaryMeanHu,
     vdtDays,
     site: primarySite,
+    box01,
+    box02,
   };
 
   return {
