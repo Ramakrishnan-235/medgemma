@@ -47,3 +47,4 @@ def test_inference_engine_mock_mode():
     assert "physical_size" in d
     assert d["physical_size"]["mean_diameter_mm"] > 0
     assert "lung_rads_assessment" in res
+

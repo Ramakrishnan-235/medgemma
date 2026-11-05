@@ -84,3 +84,4 @@
 - [ ] Step 3: Run frontend type-check `bun run --cwd apps/web type-check`.
 - [ ] Step 4: Run frontend production build `bun run --cwd apps/web build`.
 - [ ] Step 5: Verify live backend endpoint on `http://localhost:8000/api/v1/ct/infer-slice`.
+
