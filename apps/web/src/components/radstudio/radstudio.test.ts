@@ -118,7 +118,9 @@ describe("MedGemma RadStudio Suite", () => {
     const fs = await import("fs");
     const { parseDicomBuffer, renderSliceToRgba, calculateHu } = await import("./dicom-loader");
 
-    const filePath = "./apps/web/public/samples/CT_small.dcm";
+    const filePath = fs.existsSync("./apps/web/public/samples/CT_small.dcm")
+      ? "./apps/web/public/samples/CT_small.dcm"
+      : "./public/samples/CT_small.dcm";
     const fileBytes = new Uint8Array(fs.readFileSync(filePath));
     const slice = parseDicomBuffer(fileBytes, "CT_small.dcm");
 
@@ -201,7 +203,9 @@ describe("MedGemma RadStudio Suite", () => {
     const { parseDicomBuffer } = await import("./dicom-loader");
     const { analyzeDicomDataset } = await import("./clinical-analyzer");
 
-    const filePath = "./apps/web/public/samples/CT_small.dcm";
+    const filePath = fs.existsSync("./apps/web/public/samples/CT_small.dcm")
+      ? "./apps/web/public/samples/CT_small.dcm"
+      : "./public/samples/CT_small.dcm";
     const fileBytes = new Uint8Array(fs.readFileSync(filePath));
     const slice = parseDicomBuffer(fileBytes, "CT_small.dcm");
 
