@@ -137,6 +137,7 @@ class MedGemmaLocalInferenceEngine:
         slice_index: int = 1,
         pixel_spacing: Optional[List[float]] = None,
         original_shape: Optional[Tuple[int, int]] = None,
+        mock_mode: bool = False,
     ) -> Dict[str, Any]:
         """
         Runs pulmonary nodule detection on a single axial CT slice image.
@@ -152,7 +153,7 @@ class MedGemmaLocalInferenceEngine:
         pil_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         width, height = pil_image.size
 
-        has_model = self.load_model_if_available()
+        has_model = False if (mock_mode or self.force_mock) else self.load_model_if_available()
         detections: List[Dict[str, Any]] = []
 
         if has_model and self._model is not None and self._processor is not None:

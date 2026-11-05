@@ -36,6 +36,7 @@ from app.services.preprocess_ct import process_raw_hu_volume_for_medgemma
 from app.services.inference_router import run_study_pipeline
 from app.services.vqa_stream_server import MedGemmaVQASessionManager
 from app.services.monai_segmentation_fallback import compute_cubic_mm_volume
+from app.services.local_medgemma import local_inference_engine
 
 router = APIRouter(prefix="/volumetric", tags=["volumetric"])
 ct_router = APIRouter(prefix="/ct", tags=["ct-volume"])
@@ -503,6 +504,31 @@ class VQAStreamRequest(BaseModel):
     study_id: str = Field(default="STUDY-CT-2026-001", max_length=64)
     question: str = Field(default="Describe the primary finding and Lung-RADS category", min_length=2, max_length=1000)
     mock_mode: bool = Field(default=True)
+
+
+class SliceInferenceRequest(BaseModel):
+    image_base64: str = Field(description="Base64 encoded PNG or JPEG image of the axial CT slice")
+    slice_index: int = Field(default=1, ge=1)
+    pixel_spacing: list[float] = Field(default_factory=lambda: [0.70, 0.70])
+    original_shape: list[int] = Field(default_factory=lambda: [512, 512])
+    mock_mode: bool = Field(default=False)
+
+
+@ct_router.post("/infer-slice")
+@router.post("/ct/infer-slice")
+async def infer_ct_slice(payload: SliceInferenceRequest):
+    """
+    Direct bridge to the local MedGemma 1.5 4B vision-language model.
+    Detects pulmonary nodules, extracts normalized bounding box [ymin, xmin, ymax, xmax],
+    converts to physical mm, and evaluates ACR Lung-RADS v2022.
+    """
+    return local_inference_engine.infer_slice(
+        image_base64=payload.image_base64,
+        slice_index=payload.slice_index,
+        pixel_spacing=payload.pixel_spacing,
+        original_shape=(payload.original_shape[0], payload.original_shape[1]) if len(payload.original_shape) >= 2 else (512, 512),
+        mock_mode=payload.mock_mode,
+    )
 
 
 @ct_router.post("/dag-pipeline")
