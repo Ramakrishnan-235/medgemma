@@ -96,3 +96,4 @@ async def test_run_study_pipeline_mock_mode():
     report_text = "".join(tokens)
     assert len(report_text) > 0
     assert "Findings" in report_text or "Impression" in report_text
+

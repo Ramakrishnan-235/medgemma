@@ -168,3 +168,4 @@ def test_full_dag_api_integration(test_client):
     assert "text/event-stream" in vqa_resp.headers["content-type"]
     assert "data:" in vqa_resp.text
     assert "[DONE]" in vqa_resp.text
+

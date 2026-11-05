@@ -37,3 +37,4 @@ def test_compute_cubic_mm_volume_synthetic():
     assert result["mean_hu"] == pytest.approx(40.0, abs=1.0)
     assert result["voxel_count"] > 0
     assert result["method"] in ["monai_vista3d_hook", "monai_active_contour_fallback"]
+

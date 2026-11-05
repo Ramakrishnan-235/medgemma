@@ -157,3 +157,4 @@ class MedGemmaVQAServicer:
             mock_mode=mock_mode,
         ):
             yield chunk
+
