@@ -14,14 +14,16 @@ services:
       # Cache HuggingFace weights on host so they aren't redownloaded
       - ~/.cache/huggingface:/root/.cache/huggingface
     command: >
-      serve google/medgemma-1.5-4b
+      serve google/medgemma-1.5-4b-it
       --host 0.0.0.0
       --port 8000
-      --max-model-len 131072
-      --limit-mm-per-prompt '{"image": 64}'
+      --max-model-len 65536
+      --limit-mm-per-prompt '{"image": 128}'
       --trust-remote-code
       --dtype bfloat16
-      --gpu-memory-utilization 0.85
+      --enable-prefix-caching
+      --guided-decoding-backend xgrammar
+      --gpu-memory-utilization 0.90
     deploy:
       resources:
         reservations:

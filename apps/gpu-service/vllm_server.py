@@ -15,9 +15,10 @@ from processors import PROCESSOR_VERSION, decode_and_normalize_b64_images
 CHECKPOINT = os.getenv("MEDGEMMA_CHECKPOINT", "google/medgemma-1.5-4b-it")
 MAX_CONCURRENCY = int(os.getenv("MEDGEMMA_MAX_CONCURRENCY", "4"))
 MAX_QUEUE_DEPTH = int(os.getenv("MEDGEMMA_MAX_QUEUE_DEPTH", "16"))
-MAX_MODEL_LEN = int(os.getenv("VLLM_MAX_MODEL_LEN", "16384"))
-GPU_MEM_UTIL = float(os.getenv("VLLM_GPU_MEMORY_UTILIZATION", "0.88"))
-MAX_IMAGES_PER_PROMPT = int(os.getenv("VLLM_MAX_IMAGES_PER_PROMPT", "4"))
+MAX_MODEL_LEN = int(os.getenv("VLLM_MAX_MODEL_LEN", "65536"))
+GPU_MEM_UTIL = float(os.getenv("VLLM_GPU_MEMORY_UTILIZATION", "0.90"))
+MAX_IMAGES_PER_PROMPT = int(os.getenv("VLLM_MAX_IMAGES_PER_PROMPT", "128"))
+DEFAULT_REPETITION_PENALTY = 1.05
 
 
 class ImageInput(BaseModel):
@@ -28,7 +29,7 @@ class ImageInput(BaseModel):
 class MedGemmaGenerateRequest(BaseModel):
     system_instruction: str
     user_prompt: str
-    images: list[ImageInput] = Field(default_factory=list, max_length=4)
+    images: list[ImageInput] = Field(default_factory=list, max_length=128)
     max_new_tokens: int = Field(default=768, ge=16, le=2048)
 
 
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI):
         max_num_seqs=MAX_CONCURRENCY,
         gpu_memory_utilization=GPU_MEM_UTIL,
         enable_prefix_caching=True,
+        guided_decoding_backend="xgrammar",
         limit_mm_per_prompt={"image": MAX_IMAGES_PER_PROMPT},
         enforce_eager=False,
         disable_log_requests=True,
@@ -163,11 +165,12 @@ async def generate(req: MedGemmaGenerateRequest) -> MedGemmaGenerateResponse:
                 add_generation_prompt=True,
             )
 
-            # Greedy decoding (temperature=0.0) for clinical reproducibility
+            # Greedy decoding (temperature=0.0) with repetition penalty to prevent whitespace loops
             sampling_params = SamplingParams(
                 temperature=0.0,
                 top_p=1.0,
                 max_tokens=req.max_new_tokens,
+                repetition_penalty=DEFAULT_REPETITION_PENALTY,
             )
 
             vllm_inputs: dict = {"prompt": prompt_str}
