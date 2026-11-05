@@ -32,9 +32,15 @@ from app.services.ct_classifiers import (
 )
 from app.services.targeted_slice_vqa import answer_targeted_slice_question
 from app.services.visual_grounding import get_slice_grounding_annotations
+from app.services.preprocess_ct import process_raw_hu_volume_for_medgemma
+from app.services.inference_router import run_study_pipeline
+from app.services.vqa_stream_server import MedGemmaVQASessionManager
+from app.services.monai_segmentation_fallback import compute_cubic_mm_volume
 
 router = APIRouter(prefix="/volumetric", tags=["volumetric"])
 ct_router = APIRouter(prefix="/ct", tags=["ct-volume"])
+
+vqa_session_manager = MedGemmaVQASessionManager()
 
 
 class VolumetricAnalysisRequest(BaseModel):
@@ -484,4 +490,106 @@ async def get_slice_visual_grounding(
 ) -> list[VisualGroundingAnnotation]:
     """Retrieves spatial bounding boxes [ymin, xmin, ymax, xmax] for an axial CT/MRI slice."""
     return get_slice_grounding_annotations(case_id=case_id, slice_index=slice_index, modality=modality)
+
+
+class DAGPipelineRequest(BaseModel):
+    study_id: str = Field(default="STUDY-CT-2026-001", max_length=64)
+    max_slices: int = Field(default=64, ge=16, le=128)
+    stream_report: bool = Field(default=False)
+    mock_mode: bool = Field(default=True)
+
+
+class VQAStreamRequest(BaseModel):
+    study_id: str = Field(default="STUDY-CT-2026-001", max_length=64)
+    question: str = Field(default="Describe the primary finding and Lung-RADS category", min_length=2, max_length=1000)
+    mock_mode: bool = Field(default=True)
+
+
+@ct_router.post("/dag-pipeline")
+@router.post("/ct/dag-pipeline")
+async def execute_dag_pipeline(payload: DAGPipelineRequest | None = None):
+    """
+    Executes the Prefix-Cached Dual-Path DAG:
+    1. 3-channel HU windowing (Lung, Mediastinum, Bone) resized to 896x896.
+    2. Parallel execution of Output B (Lung-RADS JSON) and Output D (3D bounding boxes JSON).
+    3. DICOM affine unprojection of boxes to physical mm and MONAI 3D cubic mm volumetry.
+    4. Unconstrained streaming/grounded radiology report (Output A).
+    5. Study vision prefix registered in warm cache for sub-150ms TTFT interactive VQA (Output C).
+    """
+    import base64
+    import io
+    import json
+
+    req = payload or DAGPipelineRequest()
+    vol_hu, roi_mask, spacing = generate_synthetic_3d_ct_volume(num_slices=160)
+    rgb_images, spatial_meta = process_raw_hu_volume_for_medgemma(
+        vol_hu, spacing_xyz=spacing, max_slices=req.max_slices
+    )
+
+    b64_slices: list[str] = []
+    for img in rgb_images:
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64_slices.append(base64.b64encode(buf.getvalue()).decode("ascii"))
+
+    # Register in warm VQA session cache
+    vqa_session_manager.register_study_prefix(req.study_id, b64_slices)
+
+    output_b, output_d, report_stream = await run_study_pipeline(
+        base64_slices=b64_slices,
+        spatial_meta=spatial_meta,
+        mock_mode=req.mock_mode,
+    )
+
+    # Enrich detections with MONAI 3D volumetric fallback
+    for det in output_d.get("detections", []):
+        det["monai_3d_volume"] = compute_cubic_mm_volume(vol_hu, spacing, det)
+
+    if req.stream_report:
+        async def sse_stream():
+            async for chunk in report_stream:
+                yield f"data: {json.dumps({'token': chunk})}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
+    report_chunks = []
+    async for chunk in report_stream:
+        report_chunks.append(chunk)
+
+    return {
+        "status": "success",
+        "study_id": req.study_id,
+        "slices_processed": len(rgb_images),
+        "token_budget": len(rgb_images) * 256,
+        "output_b_lung_rads": output_b,
+        "output_d_detections": output_d.get("detections", []),
+        "output_a_narrative_report": "".join(report_chunks),
+        "spatial_meta": spatial_meta,
+    }
+
+
+@ct_router.post("/vqa-stream")
+@router.post("/ct/vqa-stream")
+async def stream_interactive_vqa(payload: VQAStreamRequest):
+    """
+    Stateful interactive VQA session streaming.
+    Reuses warm KV-cache blocks without re-encoding the 3D CT volume.
+    """
+    import json
+
+    if not vqa_session_manager.has_study(payload.study_id):
+        vqa_session_manager.register_study_prefix(payload.study_id, ["dummy_b64_seed"])
+
+    async def event_generator():
+        async for chunk in vqa_session_manager.stream_question(
+            study_id=payload.study_id,
+            question=payload.question,
+            mock_mode=payload.mock_mode,
+        ):
+            yield f"data: {json.dumps(chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 

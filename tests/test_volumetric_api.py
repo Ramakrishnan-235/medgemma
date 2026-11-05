@@ -120,6 +120,42 @@ class TestVolumetricAPI(unittest.TestCase):
         self.assertIn("box_1000", data[0])
         self.assertGreater(data[0]["box_1000"]["ymax"], data[0]["box_1000"]["ymin"])
 
+    def test_dag_pipeline_endpoint(self):
+        payload = {
+            "study_id": "STUDY-TEST-DAG-99",
+            "max_slices": 32,
+            "stream_report": False,
+            "mock_mode": True,
+        }
+        resp = self.client.post("/api/v1/ct/dag-pipeline", json=payload)
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["study_id"], "STUDY-TEST-DAG-99")
+        self.assertEqual(data["slices_processed"], 32)
+        self.assertEqual(data["token_budget"], 32 * 256)
+        self.assertIn("output_b_lung_rads", data)
+        self.assertIn("output_d_detections", data)
+        self.assertTrue(len(data["output_d_detections"]) > 0)
+        first_det = data["output_d_detections"][0]
+        self.assertIn("physical_size", first_det)
+        self.assertIn("monai_3d_volume", first_det)
+        self.assertGreater(first_det["monai_3d_volume"]["volume_mm3"], 0)
+        self.assertIn("output_a_narrative_report", data)
+        self.assertIn("Findings", data["output_a_narrative_report"])
+
+    def test_vqa_stream_endpoint(self):
+        payload = {
+            "study_id": "STUDY-TEST-DAG-99",
+            "question": "What is the nodule volume and Lung-RADS score?",
+            "mock_mode": True,
+        }
+        resp = self.client.post("/api/v1/ct/vqa-stream", json=payload)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/event-stream", resp.headers["content-type"])
+        self.assertIn("data:", resp.text)
+        self.assertIn("[DONE]", resp.text)
+
 
 
 if __name__ == "__main__":
