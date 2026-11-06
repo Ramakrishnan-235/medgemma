@@ -227,7 +227,7 @@ jobs:
           docker compose --env-file .env.test config --quiet
 
       - name: Build Web Container
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./apps/web
           file: ./apps/web/Dockerfile
@@ -235,7 +235,7 @@ jobs:
           tags: medgemma-web:ci-test
 
       - name: Build API Container
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: ./apps/api
           file: ./apps/api/Dockerfile
@@ -243,7 +243,7 @@ jobs:
           tags: medgemma-api:ci-test
 
       - name: Build Medical Processing Backend Container
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.backend
