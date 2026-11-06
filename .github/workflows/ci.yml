@@ -163,7 +163,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Cache intfloat/e5-small-v2 CPU Weights
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: hf-e5-small-v2-v1
