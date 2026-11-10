@@ -35,6 +35,7 @@ export interface LesionBox {
   site: string;
   riskCategory: string;
   isAiGenerated?: boolean;
+  provenance?: "neural_medgemma" | "heuristic_voxel" | "mock_fallback";
 }
 
 export interface DiagnosticAssessmentData {

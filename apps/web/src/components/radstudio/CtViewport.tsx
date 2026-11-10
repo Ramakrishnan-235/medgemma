@@ -90,6 +90,30 @@ export function CtViewport({
   const [dragOverViewport, setDragOverViewport] = useState(false);
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [uploadProgressText, setUploadProgressText] = useState("");
+  const [showNeuralLayer, setShowNeuralLayer] = useState(true);
+  const [showHeuristicLayer, setShowHeuristicLayer] = useState(true);
+
+  // Keyboard shortcut listener: Key N for Neural layer, Key H for Heuristic layer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === "n" || e.key === "N") {
+        setShowNeuralLayer((prev) => {
+          const next = !prev;
+          onToast(`Neural Layer (MedGemma AI): ${next ? "ON" : "OFF"}`);
+          return next;
+        });
+      } else if (e.key === "h" || e.key === "H") {
+        setShowHeuristicLayer((prev) => {
+          const next = !prev;
+          onToast(`Heuristic Layer (Voxel Cluster): ${next ? "ON" : "OFF"}`);
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onToast]);
 
   const presets: { id: WlPresetType; label: string }[] = [
     { id: "lung", label: "Lung (W:1500 L:-600)" },
@@ -234,13 +258,18 @@ export function CtViewport({
     }
   };
 
-  // Lesion opacity based on proximity to target slice
+  // Lesion opacity based on proximity to target slice and decoupled layer toggles
   const sliceDistanceBox01 = box01 ? Math.abs(slice - box01.sliceIndex) : 999;
-  const showBox01 = isStudyLoaded && Boolean(box01) && series === "axial" && sliceDistanceBox01 <= 6;
+  const isBox01Neural = box01?.provenance === "neural_medgemma" || (box01?.isAiGenerated && box01?.provenance !== "heuristic_voxel");
+  const isBox01Heuristic = box01?.provenance === "heuristic_voxel";
+  const isBox01Mock = box01?.provenance === "mock_fallback";
+  const layerVisibleBox01 = isBox01Neural ? showNeuralLayer : (isBox01Heuristic ? showHeuristicLayer : true);
+
+  const showBox01 = isStudyLoaded && Boolean(box01) && series === "axial" && sliceDistanceBox01 <= 6 && layerVisibleBox01;
   const opacityBox01 = showBox01 ? Math.max(0.2, 1 - sliceDistanceBox01 * 0.15) : 0;
 
   const sliceDistanceBox02 = box02 ? Math.abs(slice - box02.sliceIndex) : 999;
-  const showBox02 = isStudyLoaded && Boolean(box02) && series === "axial" && sliceDistanceBox02 <= 6;
+  const showBox02 = isStudyLoaded && Boolean(box02) && series === "axial" && sliceDistanceBox02 <= 6 && showHeuristicLayer;
   const opacityBox02 = showBox02 ? Math.max(0.2, 1 - sliceDistanceBox02 * 0.15) : 0;
 
   return (
@@ -582,6 +611,18 @@ export function CtViewport({
             <div className="absolute inset-0 pointer-events-none z-10 opacity-30 mix-blend-screen bg-radial from-red-600 via-amber-500 to-transparent blur-md" />
           )}
 
+          {/* Explicit Negative Detection HUD Pill (Zero Fallback) */}
+          {!box01 && !box02 && isStudyLoaded && !isInferring && (
+            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
+              <div className="bg-gray-950/90 text-gray-200 border border-gray-700/80 px-3.5 py-1.5 rounded-full text-[11px] font-mono flex items-center gap-2 shadow-xl backdrop-blur-md">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>
+                  ✓ MedGemma 1.5 4B: No focal nodules detected on Slice {slice} (Z: {zPositionMm}mm)
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Real CT Canvas Display */}
           <div
             style={{
@@ -621,20 +662,48 @@ export function CtViewport({
                 <div
                   className={`relative ${
                     box01.box_2d_1000 ? "w-full h-full" : "w-16 h-16"
-                  } border-2 border-red-500 rounded-xs bg-red-500/10 shadow-[0_0_12px_rgba(239,68,68,0.5)]`}
+                  } ${
+                    isBox01Neural
+                      ? "border-2 border-cyan-400 rounded-xs bg-cyan-500/10 shadow-[0_0_14px_rgba(6,182,212,0.45)]"
+                      : isBox01Heuristic
+                      ? "border-2 border-dashed border-amber-400 rounded-xs bg-amber-500/10 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
+                      : "border-2 border-dashed border-slate-400 rounded-xs bg-slate-500/10 shadow-[0_0_10px_rgba(148,163,184,0.3)]"
+                  }`}
                 >
-                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-600 text-white text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  <div
+                    className={`absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] font-mono font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-1.5 ${
+                      isBox01Neural
+                        ? "bg-cyan-950/90 text-cyan-300 border border-cyan-400/40"
+                        : isBox01Heuristic
+                        ? "bg-amber-950/90 text-amber-300 border border-amber-400/40"
+                        : "bg-slate-900 text-slate-300 border border-slate-600"
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        isBox01Neural ? "bg-cyan-400 animate-pulse" : isBox01Heuristic ? "bg-amber-400" : "bg-slate-400"
+                      }`}
+                    />
                     <span>BOX-01: {box01.diameterMm}mm</span>
-                    {box01.isAiGenerated && (
-                      <span className="bg-red-950/80 text-emerald-300 text-[8px] px-1 py-0.2 rounded font-sans uppercase font-bold tracking-tight border border-emerald-400/30">
-                        MedGemma 4B
+                    {isBox01Neural && (
+                      <span className="bg-cyan-900/90 text-cyan-200 text-[8px] px-1 py-0.2 rounded font-mono uppercase font-bold tracking-tight border border-cyan-400/50">
+                        AI: MedGemma 1.5 4B
+                      </span>
+                    )}
+                    {isBox01Heuristic && (
+                      <span className="bg-amber-900/90 text-amber-200 text-[8px] px-1 py-0.2 rounded font-mono uppercase font-bold tracking-tight border border-amber-400/50">
+                        Heuristic Voxel ({box01.huAttenuation} HU)
+                      </span>
+                    )}
+                    {isBox01Mock && (
+                      <span className="bg-slate-800 text-slate-300 text-[8px] px-1 py-0.2 rounded font-mono uppercase font-bold">
+                        Mock Fixture
                       </span>
                     )}
                   </div>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-full h-px bg-red-400/80" />
-                    <div className="h-full w-px bg-red-400/80" />
+                    <div className={`w-full h-px ${isBox01Neural ? "bg-cyan-400/80" : isBox01Heuristic ? "bg-amber-400/80" : "bg-slate-400/80"}`} />
+                    <div className={`h-full w-px ${isBox01Neural ? "bg-cyan-400/80" : isBox01Heuristic ? "bg-amber-400/80" : "bg-slate-400/80"}`} />
                   </div>
                 </div>
               </div>
@@ -652,9 +721,9 @@ export function CtViewport({
                 }}
                 className="pointer-events-none transition-opacity duration-300 z-10"
               >
-                <div className="relative w-10 h-10 border-2 border-amber-500 rounded-sm bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.5)]">
-                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-600 text-white text-[8px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm">
-                    BOX-02: {box02.diameterMm}mm
+                <div className="relative w-10 h-10 border-2 border-dashed border-amber-400 rounded-sm bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.4)]">
+                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-950/90 text-amber-300 border border-amber-400/40 text-[8px] font-mono font-bold px-1.5 py-0.5 rounded shadow-sm">
+                    BOX-02: {box02.diameterMm}mm • Heuristic
                   </div>
                 </div>
               </div>

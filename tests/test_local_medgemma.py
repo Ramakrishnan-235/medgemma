@@ -44,7 +44,38 @@ def test_inference_engine_mock_mode():
     assert len(res["detections"]) > 0
     d = res["detections"][0]
     assert "box_2d_1000" in d
+    assert "box_norm" in d
+    assert d["provenance"] == "mock_fallback"
     assert "physical_size" in d
     assert d["physical_size"]["mean_diameter_mm"] > 0
     assert "lung_rads_assessment" in res
+
+
+def test_inference_engine_mock_with_voxel_finding():
+    engine = MedGemmaLocalInferenceEngine(force_mock=True)
+    res = engine.infer_slice(
+        image_base64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        slice_index=20,
+        pixel_spacing=[0.7, 0.7],
+        voxel_finding={
+            "coordinates": [0.45, 0.55],
+            "diameterMm": 12.0,
+            "site": "RLL Basilar",
+            "meanHu": 42,
+        },
+    )
+    assert res["status"] == "success"
+    assert len(res["detections"]) == 1
+    d = res["detections"][0]
+    assert d["provenance"] == "heuristic_voxel"
+    assert "box_norm" in d
+    assert d["site"] == "RLL Basilar"
+
+
+def test_parse_medgemma_location_tokens_provenance():
+    text = "<loc0200><loc0300><loc0400><loc0500> solitary pulmonary nodule"
+    dets = parse_medgemma_location_tokens(text)
+    assert len(dets) == 1
+    assert dets[0]["box_2d_1000"] == [200, 300, 400, 500]
+
 

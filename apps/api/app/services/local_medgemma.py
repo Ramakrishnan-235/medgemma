@@ -19,6 +19,21 @@ def clamp_box_1000(box: List[int | float]) -> List[int]:
     return [max(0, min(1000, int(round(val)))) for val in box]
 
 
+def is_valid_box_1000(box: List[int]) -> bool:
+    """Validates that a normalized bounding box has positive dimensions."""
+    return len(box) == 4 and (box[2] > box[0]) and (box[3] > box[1])
+
+
+def box_1000_to_norm(box: List[int]) -> Dict[str, float]:
+    """Converts [ymin, xmin, ymax, xmax] in 0-1000 scale to {x0, y0, x1, y1} in 0-1 scale."""
+    return {
+        "x0": round(box[1] / 1000.0, 4),
+        "y0": round(box[0] / 1000.0, 4),
+        "x1": round(box[3] / 1000.0, 4),
+        "y1": round(box[2] / 1000.0, 4),
+    }
+
+
 def parse_medgemma_location_tokens(text: str) -> List[Dict[str, Any]]:
     """
     Parses MedGemma normalized vision location tokens:
@@ -244,43 +259,65 @@ class MedGemmaLocalInferenceEngine:
             b = detections[0]["box_2d_1000"]
             span_y = b[2] - b[0]
             span_x = b[3] - b[1]
-            if 15 <= span_y <= 850 and 15 <= span_x <= 850:
+            if 15 <= span_y <= 850 and 15 <= span_x <= 850 and is_valid_box_1000(b):
                 valid_model_box = True
+                for det in detections:
+                    det["provenance"] = "neural_medgemma"
+            else:
+                # Degenerate or malformed box from model; clear to enforce clean empty state
+                detections = []
 
-        # Anchor with true volumetric coordinates if model gave no tight box
-        if not valid_model_box and voxel_finding:
-            coords = voxel_finding.get("coordinates")
-            if coords and len(coords) >= 2:
-                cx_norm, cy_norm = coords[0], coords[1]
-                d_mm = float(diam_hint)
-                rad_px_y = ((d_mm / 2.0) / spacing[0]) if spacing[0] > 0 else 25
-                rad_px_x = ((d_mm / 2.0) / spacing[1]) if spacing[1] > 0 else 25
-                rad_norm_y = (rad_px_y / rows) * 1000
-                rad_norm_x = (rad_px_x / cols) * 1000
+        # Zero-fallback enforcement:
+        # If running live (not mock_mode and not force_mock), never inject fallback coordinates.
+        # Only in explicit mock testing (mock_mode or force_mock) do we generate mock/heuristic fixtures.
+        if (mock_mode or self.force_mock) and not detections:
+            if voxel_finding:
+                coords = voxel_finding.get("coordinates")
+                if coords and len(coords) >= 2:
+                    cx_norm, cy_norm = coords[0], coords[1]
+                    d_mm = float(diam_hint)
+                    rad_px_y = ((d_mm / 2.0) / spacing[0]) if spacing[0] > 0 else 25
+                    rad_px_x = ((d_mm / 2.0) / spacing[1]) if spacing[1] > 0 else 25
+                    rad_norm_y = (rad_px_y / rows) * 1000
+                    rad_norm_x = (rad_px_x / cols) * 1000
 
-                ymin = max(0, min(1000, int(round((cy_norm * 1000) - rad_norm_y))))
-                xmin = max(0, min(1000, int(round((cx_norm * 1000) - rad_norm_x))))
-                ymax = max(0, min(1000, int(round((cy_norm * 1000) + rad_norm_y))))
-                xmax = max(0, min(1000, int(round((cx_norm * 1000) + rad_norm_x))))
+                    ymin = max(0, min(1000, int(round((cy_norm * 1000) - rad_norm_y))))
+                    xmin = max(0, min(1000, int(round((cx_norm * 1000) - rad_norm_x))))
+                    ymax = max(0, min(1000, int(round((cy_norm * 1000) + rad_norm_y))))
+                    xmax = max(0, min(1000, int(round((cx_norm * 1000) + rad_norm_x))))
 
+                    detections = [{
+                        "box_2d_1000": [ymin, xmin, ymax, xmax],
+                        "label": f"{site_hint} Nodule",
+                        "confidence": 0.95,
+                        "site": site_hint,
+                        "provenance": "heuristic_voxel",
+                    }]
+                elif "box_2d_1000" in voxel_finding:
+                    detections = [{
+                        "box_2d_1000": clamp_box_1000(voxel_finding["box_2d_1000"]),
+                        "label": f"{site_hint} Nodule",
+                        "confidence": 0.95,
+                        "site": site_hint,
+                        "provenance": "heuristic_voxel",
+                    }]
+            else:
+                # Deterministic test fixture for mock mode testing
                 detections = [{
-                    "box_2d_1000": [ymin, xmin, ymax, xmax],
+                    "box_2d_1000": [380, 420, 440, 490],
                     "label": f"{site_hint} Nodule",
-                    "confidence": 0.95,
+                    "confidence": 0.90,
                     "site": site_hint,
-                }]
-            elif "box_2d_1000" in voxel_finding:
-                detections = [{
-                    "box_2d_1000": clamp_box_1000(voxel_finding["box_2d_1000"]),
-                    "label": f"{site_hint} Nodule",
-                    "confidence": 0.95,
-                    "site": site_hint,
+                    "provenance": "mock_fallback",
                 }]
 
-        # Calculate physical mm dimensions for detections
+        # Calculate physical mm dimensions and normalized coordinates for detections
         for det in detections:
             det["slice_index"] = slice_index
             ymin, xmin, ymax, xmax = det["box_2d_1000"]
+            det["box_norm"] = box_1000_to_norm([ymin, xmin, ymax, xmax])
+            if "provenance" not in det:
+                det["provenance"] = "neural_medgemma" if has_model else "mock_fallback"
             span_y_px = ((ymax - ymin) / 1000.0) * rows
             span_x_px = ((xmax - xmin) / 1000.0) * cols
             height_mm = round(span_y_px * spacing[0], 1)

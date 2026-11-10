@@ -22,6 +22,20 @@ def test_infer_slice_endpoint():
     d0 = data["detections"][0]
     assert "box_2d_1000" in d0
     assert len(d0["box_2d_1000"]) == 4
+    assert "box_norm" in d0
+    assert d0["provenance"] == "mock_fallback"
     assert "physical_size" in d0
     assert d0["physical_size"]["mean_diameter_mm"] > 0
     assert "lung_rads_assessment" in data
+
+
+def test_verify_engine_endpoint():
+    client = TestClient(app)
+    response = client.get("/api/v1/ct/verify-engine?mock=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["mode"] == "mock"
+    assert data["probe_tokens_parsed"] is True
+    assert "Mock Environment" in data["device_name"]
+

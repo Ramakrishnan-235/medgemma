@@ -515,6 +515,17 @@ class SliceInferenceRequest(BaseModel):
     voxel_finding: Optional[dict[str, Any]] = Field(default=None, description="Pre-computed 3D voxel ROI metrics")
 
 
+@ct_router.get("/verify-engine")
+@router.get("/ct/verify-engine")
+async def verify_engine(mock: bool = False):
+    """
+    Evaluates the live MedGemma inference engine:
+    Checks CUDA availability, VRAM allocation, model weights, and 4-bit NF4 execution.
+    """
+    from apps.api.app.services.engine_verification import run_engine_verification
+    return run_engine_verification(force_mock=mock)
+
+
 @ct_router.post("/infer-slice")
 @router.post("/ct/infer-slice")
 async def infer_ct_slice(payload: SliceInferenceRequest):
