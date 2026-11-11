@@ -88,7 +88,7 @@ class Settings(BaseModel):
     MEDGEMMA_PROCESSOR_VERSION: str = "1.5.0-896px"
     MEDGEMMA_SERVICE_URL: str = "http://gpu-service:8080"
     MEDGEMMA_BASE_URL: str = "http://127.0.0.1:12434/v1"
-    MEDGEMMA_MODEL: str = "ai/medgemma:4b-q4_K_M"
+    MEDGEMMA_MODEL: str = "huggingface.co/gguf-org/medgemma-1.5-4b-it-gguf:Q4_0"
     MEDGEMMA_MAX_CONCURRENCY: int = Field(default=1, ge=1)
     HF_TOKEN: Optional[str] = None
 

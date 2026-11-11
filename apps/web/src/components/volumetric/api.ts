@@ -532,6 +532,7 @@ export interface SliceInferenceResult {
     box_2d_1000: [number, number, number, number];
     confidence: number;
     site?: string;
+    provenance?: "neural_medgemma" | "heuristic_voxel" | "mock_fallback" | string;
     physical_size: {
       width_mm: number;
       height_mm: number;

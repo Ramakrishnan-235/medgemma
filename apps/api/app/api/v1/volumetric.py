@@ -230,7 +230,7 @@ def _build_volumetric_payload(
 async def get_volumetric_service_status() -> dict[str, Any]:
     """Returns real-time cluster health, token context window, and vLLM status."""
     base_url = os.getenv("MEDGEMMA_BASE_URL", "http://127.0.0.1:12434/v1")
-    model = os.getenv("MEDGEMMA_MODEL", "ai/medgemma:4b-q4_K_M")
+    model = os.getenv("MEDGEMMA_MODEL", "huggingface.co/gguf-org/medgemma-1.5-4b-it-gguf:Q4_0")
     is_docker_live = False
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
@@ -247,7 +247,7 @@ async def get_volumetric_service_status() -> dict[str, Any]:
         "sampled_slices_count": 64,
         "token_context_window": "128k",
         "vllm_engine": f"Docker Model Runner ({model})" if is_docker_live else "google/medgemma-1.5-4b (vllm-openai:latest)",
-        "precision": "4-bit (q4_K_M)" if is_docker_live else "bfloat16",
+        "precision": "4-bit (Q4_0)" if is_docker_live else "bfloat16",
     }
 
 
@@ -298,7 +298,7 @@ async def stream_medgemma_reasoning(
     words = text.split(" ")
 
     base_url = os.getenv("MEDGEMMA_BASE_URL", "http://127.0.0.1:12434/v1")
-    model = os.getenv("MEDGEMMA_MODEL", "ai/medgemma:4b-q4_K_M")
+    model = os.getenv("MEDGEMMA_MODEL", "huggingface.co/gguf-org/medgemma-1.5-4b-it-gguf:Q4_0")
 
     async def event_generator():
         stream_successful = False
