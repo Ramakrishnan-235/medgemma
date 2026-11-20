@@ -30,7 +30,7 @@ jobs:
     if: github.event.inputs.action != 'rollback'
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve Release Version
         id: vars
@@ -75,7 +75,7 @@ jobs:
     if: github.event.inputs.action == 'rollback'
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Execute Rollback to Target Version
         run: |
